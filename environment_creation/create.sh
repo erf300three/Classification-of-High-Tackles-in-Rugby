@@ -8,12 +8,12 @@ if [[ $# == 1 ]]; then
     # Remove the virtual environment if first argument is "clean"
     if [[ $1 == "clean" ]]; then
         echo "Removing virtual environment"
-        rm -rf Classification-of-High-Tackles-in-Rugby/venv
+        rm -rf venv
         echo "Virtual environment removed"
     # Update the virtual environment if first argument is "update"
     elif [[ $1 == "update" ]]; then 
         # Activate the virtual environment
-        source Classification-of-High-Tackles-in-Rugby/venv/bin/activate
+        source venv/bin/activate
         # Upgrade pip
         pip install --upgrade pip
         # Install the required packages
@@ -28,11 +28,11 @@ if [[ $# == 1 ]]; then
     fi
 # If no arguments are provided, create the virtual environment if it does not exist
 else 
-    if ! [ -d "Classification-of-High-Tackles-in-Rugby/venv" ]; then
-        python3 -m venv --system-site-packages Classification-of-High-Tackles-in-Rugby/venv
+    if ! [ -d "venv" ]; then
+        python3 -m venv --system-site-packages venv
         echo "Virtual environment created"
         # Activate the virtual environment
-        source Classification-of-High-Tackles-in-Rugby/venv/bin/activate
+        source venv/bin/activate
         echo "Virtual environment activated"
 
         # Display the python version
@@ -42,7 +42,7 @@ else
         pip install --upgrade pip 
 
         # Install the required packages
-        pip install -r Classification-of-High-Tackles-in-Rugby/environment_creation/requirements.txt
+        pip install -r environment_creation/requirements.txt
         echo "Required packages installed"
         deactivate
     else
