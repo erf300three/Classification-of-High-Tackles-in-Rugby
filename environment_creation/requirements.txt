@@ -1,2 +1,5 @@
 numpy
 pandas
+opencv-python
+ffmpeg
+moviepy
