@@ -161,3 +161,7 @@ cython_debug/
 
 # Video data
 data/
+*.avi
+
+# prebuilt yolo model
+yolo*
