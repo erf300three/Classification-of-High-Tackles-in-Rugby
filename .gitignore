@@ -165,3 +165,6 @@ data/
 
 # prebuilt yolo model
 yolo*
+
+# Kudu log files
+kudu_jobs/
