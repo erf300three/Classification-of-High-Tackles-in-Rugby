@@ -18,7 +18,7 @@ if [[ $# == 1 ]]; then
         pip install --upgrade pip
         # Install the required packages
         pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-        pip install -r Classification-of-High-Tackles-in-Rugby/environment_creation/requirements.txt
+        pip install -r environment_creation/requirements.txt
         echo "Required packages installed"
         # Deactivate the virtual environment
         deactivate
