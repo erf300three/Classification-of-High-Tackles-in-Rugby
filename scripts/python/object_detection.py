@@ -7,8 +7,6 @@ import cv2
 from ultralytics.utils.plotting import Annotator, colors
 from collections import defaultdict
 
-print("Hello, World!")
-
 def object_tracking(input_path, output_path, yolo):
     """
     Tracks objects in the video
@@ -17,17 +15,68 @@ def object_tracking(input_path, output_path, yolo):
     :param yolo: yolo object
     :return: whether the operation was successful
     """
-
-    results = yolo.track(input_path, show=False, save=True, project=output_path, name='tracked', tracker="bytetrack.yaml", persist=True, classes=[0,32])
-
-
+    results = yolo.track(input_path, show=False, save=True, project=output_path, name='tracked', tracker="bytetrack.yaml", persist=True)
     # results = model.track(video_path, show=True, save=True, save_dir=output_path, tracker="bytetrack.yaml")
     
-# torch.cuda.set_device(0)
+    
+def object_detection_in_video(input_path, output_path, yolo):
+    """
+    Detects objects in the video
+    :param video_path: path to the video
+    :param output_path: path to the output video
+    :param yolo: yolo object
+    :return: whether the operation was successful
+    """
+    # Make the videos directory if it doesn't exist
+    os.makedirs(os.path.join(output_path, "videos")) if not os.path.exists(os.path.join(output_path, "videos")) else None
 
-model = YOLO('yolov8x.pt')
-# model.to("cuda")
+    #  Make a .txt file for an overview of the results
+    with open(os.path.join(output_path, "results.txt"), "w") as f:
+        for video in os.listdir(input_path):
+            if not(video.endswith(".mp4")):
+                continue
+            video_path = os.path.join(input_path, video)
+            cap = cv2.VideoCapture(video_path)
+            print(cap.get(5))
+            print(cap.get(3))
+            print(cap.get(4))
+            # Video writer
+            video_writer = cv2.VideoWriter(os.path.join(output_path, "videos", video[:-4]) + "_tracked.mp4",
+                                        cv2.VideoWriter_fourcc(*'mp4v'),
+                                        int(cap.get(5)), # This is the number of frames per second
+                                        (int(cap.get(3)), int(cap.get(4))))
+            assert cap.isOpened(), "Error reading video file"
+            frame_number = 0
+            # Make sure output directory exists
+            os.makedirs(os.path.join(output_path, video[:-4])) if not os.path.exists(os.path.join(output_path, video[:-4])) else None
+            # Read until video is completed
+            while cap.isOpened():
+                success, im0 = cap.read()
+                if not success:
+                    print("Video frame is empty or video processing has been successfully completed.")
+                    break
+                frame_name = os.path.join(output_path, video[:-4], video[:-4] + "_frame" + str(frame_number) + ".jpg")
+                cv2.imwrite(frame_name, im0)
+                named_image = cv2.imread(frame_name)
+                results = yolo.predict(named_image, show=False, imgsz=1280, classes=[32])
+                # results = yolo.predict(named_image, show=False, imgsz=1280) 
+                for r in results:
+                    f.write("Tackle: " + video[:-4] + "  Frame: " + str(frame_number) + " Number of objects detected: " + str(len(r.boxes.xyxy)) + "\n")
+                # f.write("Tackle: ", video[:-4], " Frame: ", frame_number, "Number of objects detected: ", len(results.xyxy[0]))
+                annotated_frame = results[0].plot() 
+                cv2.imwrite(frame_name[:-4] + "_tracked.jpg", annotated_frame)
+                os.remove(frame_name)
+                video_writer.write(annotated_frame)
+                frame_number += 1
+            cap.release()
+            video_writer.release()
+            cv2.destroyAllWindows()
 
+
+
+torch.cuda.set_device(0)
+model = YOLO("yolov8x.pt")
+# model = YOLO("runs/detect/old_model/weights/best.pt")
 
 def heatmap_tracking(input_path):
     cap = cv2.VideoCapture(input_path)
@@ -101,6 +150,8 @@ def instance_segmentation_tracking(input_path):
     cap.release()
     cv2.destroyAllWindows() 
 
-# object_tracking("clips", "output" , model)
+object_detection_in_video("/dcs/large/u2102661/CS310/datasets/tackle_clips/temp", "/dcs/large/u2102661/CS310/datasets/tackle_clips/output/single_frame/temp_base", model)
+# object_tracking("/dcs/large/u2102661/CS310/datasets/tackle_clips/originals", "/dcs/large/u2102661/CS310/datasets/tackle_clips/output", model)
+# object_tracking("data/output_set/trimmed", "data/output_set" , model)
 # heatmap_tracking("clips/Barnes_v_Wombledon_Yellow_Card_High_Tackle1_trimmed.mp4")
-instance_segmentation_tracking("data/output_set/trimmed/Barnes_v_Wombledon_Yellow_Card_High_Tackle1_trimmed.mp4")
+# instance_segmentation_tracking("data/output_set/trimmed/Barnes_v_Wombledon_Yellow_Card_High_Tackle1_trimmed.mp4")
