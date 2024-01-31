@@ -4,4 +4,5 @@ opencv-python
 ffmpeg
 moviepy
 torch
+av
 ultralytics
