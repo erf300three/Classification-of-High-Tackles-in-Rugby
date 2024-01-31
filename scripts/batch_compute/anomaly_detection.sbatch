@@ -1,7 +1,7 @@
 #!/bin/bash
 #
 #SBATCH --job-name=anomaly-detection-gpu # Job name for tracking
-#SBATCH --partition=falcon     # Partition you wish to use (see above for list)
+#SBATCH --partition=gecko     # Partition you wish to use (see above for list)
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12     # Number of CPU threads used by your job
 #SBATCH --gres=gpu:1           # Number of GPUs to use 

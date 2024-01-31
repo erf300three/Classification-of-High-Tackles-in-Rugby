@@ -1,4 +1,5 @@
 import os
+import sys
 import numpy as np
 import pandas as pd
 import cv2
@@ -176,6 +177,16 @@ test_anomaly_dataset = AnomalyDataset(
     video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/test/anomaly",
     is_test=True)
 
+validation_normal_dataset = NormalDataset(
+    annotation_file="/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/normal/labels.csv",
+    video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/normal",
+    is_test=False)
+
+validation_anomaly_dataset = AnomalyDataset(
+    annotation_file="/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/anomaly/labels.csv",
+    video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/anomaly",
+    is_test=False)
+
 device = (
     "cuda" 
     if torch.cuda.is_available()  
@@ -188,6 +199,8 @@ train_normal_dataloader = DataLoader(train_normal_dataset, batch_size=1, shuffle
 train_anomaly_dataloader = DataLoader(train_anomaly_dataset, batch_size=1, shuffle=True)
 test_normal_dataloader = DataLoader(test_normal_dataset, batch_size=1, shuffle=True)
 test_anomaly_dataloader = DataLoader(test_anomaly_dataset, batch_size=1, shuffle=True)
+validation_normal_dataloader = DataLoader(validation_normal_dataset, batch_size=1, shuffle=True)
+validation_anomaly_dataloader = DataLoader(validation_anomaly_dataset, batch_size=1, shuffle=True)
 
 
 class MyAnomalyDetectionModel(nn.Module):
@@ -263,7 +276,9 @@ def resize_all_clips(in_dir):
 # resize_all_clips("/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/anomaly")
 
 loss_fun = loss_function
-optimiser = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
+optimiser = torch.optim.Adam(my_model.parameters(), lr=0.001)
+
+# optimiser = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
 def train(anomaly_dataloader, normal_dataloader, model , loss_fun, optimiser, batch_size=4):
     print("Starting training")
@@ -303,9 +318,9 @@ def train(anomaly_dataloader, normal_dataloader, model , loss_fun, optimiser, ba
         if batch % batch_size == 0: 
             loss = loss_fun(model, anomaly_scores, normal_scores, batch_size=batch_size)
             # Backpropagate the loss
-            optimiser.zero_grad()
             loss.backward()
             optimiser.step()
+            optimiser.zero_grad()
 
             # Print progress
             loss, percentage_completes = loss.item(),  percentage_completes + len(anomaly_scores)
@@ -315,21 +330,81 @@ def train(anomaly_dataloader, normal_dataloader, model , loss_fun, optimiser, ba
             normal_scores = []
     print("Finished training")
 
-# def validate(anomaly_dataloader, normal_dataloader, model, loss_fun, optimiser): 
+def validate(anomaly_dataloader, normal_dataloader, model, loss_fun, batch_size=4): 
+    anomaly_scores = []
+    normal_scores = []
+    frames_per_clip = 32
+    total_loss = 0
+    print("===========================================validating===========================================")
+    with torch.no_grad(): # We don't need to calculate gradients for validation
+        for batch, (anomaly_video, normal_video) in enumerate(zip(anomaly_dataloader, normal_dataloader)):
+            anomaly_video = anomaly_video["video"].to(device)
+            normal_video = normal_video["video"].to(device)
 
+            this_anomaly_scores = []
+            # Split the anomaly clips into 16 frame clips and make predictions on each clip
+            if anomaly_video.shape[1] < frames_per_clip:
+                # We cannot make a fold so we just make a prediction on the whole clip
+                this_anomaly_scores.append(model(anomaly_video.permute(0, 4, 1, 2, 3)))
+            else:
+                anomaly_clips = anomaly_video.unfold(1, frames_per_clip, frames_per_clip).permute(0, 4, 1, 5, 2, 3)
+                for i in range(anomaly_clips.shape[2]):
+                    this_anomaly_scores.append(model(anomaly_clips[:, :, i, :, :, :]))
+            
+            this_normal_scores = []
+            # Split the normal clips into 16 frame clips and make predictions on each clip
+            if normal_video.shape[1] < frames_per_clip:
+                # We cannot make a fold so we just make a prediction on the whole clip
+                this_normal_scores.append(model(normal_video.permute(0, 4, 1, 2, 3)))
+            else:
+                normal_clips = normal_video.unfold(1, frames_per_clip, frames_per_clip).permute(0, 4, 1, 5, 2, 3)
+                for i in range(normal_clips.shape[2]):
+                    this_normal_scores.append(model(normal_clips[:, :, i, :, :, :]))
+            
+            anomaly_scores.append(this_anomaly_scores)
+            normal_scores.append(this_normal_scores)
+
+            if batch % batch_size == 0: 
+                loss = loss_fun(model, anomaly_scores, normal_scores, batch_size=batch_size)
+                # Print progress
+                loss = loss.item()
+                total_loss += loss
+                print(f"loss: {loss:>7f} [{batch:>5d}/{len(anomaly_dataloader):>5d}]")
+                # Reset the lists 
+                anomaly_scores = []
+                normal_scores = []
+    return total_loss
+
+
+def save_model(model, path):
+    torch.save(model, path)
 
 # def main():
 #     print("Starting main")
+
+
 
 
 params = list(my_model.parameters())
 print(params[-1])
 print(params[-2])
 
+best_total_loss = float(sys.maxsize)
+epoch_loss = 0
 
-for epoch in range(150):
+# epochs for 10 hours is 75 
+# epochs for 12 hours is 90
+for epoch in range(90):
     print(f"Epoch {epoch + 1}\n-------------------------------")
     train(train_anomaly_dataloader, train_normal_dataloader, my_model, loss_fun, optimiser)
+    epoch_loss = validate(validation_anomaly_dataloader, validation_normal_dataloader, my_model, loss_fun)
+    if epoch_loss < best_total_loss:
+        best_total_loss = epoch_loss
+        save_model(my_model, "/dcs/large/u2102661/CS310/models/anomaly_detection/best_model.pt")
+    save_model(my_model, "/dcs/large/u2102661/CS310/models/anomaly_detection/last_model.pt")
+
+# # Save the model
+# torch.save(my_model, "/dcs/large/u2102661/CS310/models/anomaly_detection/model_3.pt")
 
 params = list(my_model.parameters())
 print(params[-1])
