@@ -169,5 +169,5 @@ yolo*
 # Runs 
 runs/
 
-# Kudu log files
-kudu_jobs/
+# mp3 temp files 
+*.mp3
