@@ -8,10 +8,9 @@ import torch
 from torch import nn
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
-from torchvision.io import read_video, VideoReader
-from torchvision.transforms import ToTensor
+from torchvision.io import read_video
+from torchvision.transforms import Normalize, Compose, RandomRotation, RandomHorizontalFlip
 import torchvision.models as models
-
 
 def data_preprocessing(sample): 
     """
@@ -50,20 +49,19 @@ class AnomalyDataset(Dataset):
     
     def __getitem__(self, idx):
         video_path = os.path.join(self.video_dir, self.video_labels.iloc[idx, 0])
+        video_name = self.video_labels.iloc[idx, 0]
         label = self.video_labels.iloc[idx, 1]
         # Resize the video to 240 x 320 pixels 30 frames per second if it hasn't been done already
         if not os.path.exists(video_path[:-4] + "_resize.mp4"):
             data_preprocessing(video_path)
         video, audio, info = read_video(video_path[:-4] + "_resize.mp4", pts_unit='sec')
+        video = video.permute(0, 3, 1, 2)
         video = video.to(dtype=torch.float32)
-        sample = {'video': video, 'audio': audio, 'label': label}
         if self.transform:
-            sample = self.transform(sample)
+            video = self.transform(video)
         if self.target_transform:
-            sample = self.target_transform(sample)
-        return sample
-
-
+            label = self.target_transform(label)
+        return video, label, video_name
 
 class NormalDataset(Dataset):
     def __init__(self, annotation_file, video_dir, is_test=False, transform=None, target_transform=None):
@@ -78,130 +76,19 @@ class NormalDataset(Dataset):
     
     def __getitem__(self, idx):
         video_path = os.path.join(self.video_dir, self.video_labels.iloc[idx, 0])
+        video_name = self.video_labels.iloc[idx, 0]
         label = self.video_labels.iloc[idx, 1]
         # Resize the video to 240 x 320 pixels 30 frames per second if it hasn't been done already
         if not os.path.exists(video_path[:-4] + "_resize.mp4"):
             data_preprocessing(video_path)
         video, audio, info = read_video(video_path[:-4] + "_resize.mp4", pts_unit='sec')
+        video = video.permute(0, 3, 1, 2)
         video = video.to(dtype=torch.float32)
-        sample = {'video': video, 'audio': audio, 'label': label}
         if self.transform:
-            sample = self.transform(sample)
+            video = self.transform(video)
         if self.target_transform:
-            sample = self.target_transform(sample)
-        return sample
-    
-
-
-class AnomalyDetectionDataset(Dataset):
-    def __init__(self, annotation_file, video_dir, transform=None, target_transform=None):
-
-        self.video_labels = pd.read_csv(annotation_file)
-        self.video_dir = video_dir
-        self.transform = transform
-        self.target_transform = target_transform
-
-    def __len__(self):
-        return len(self.video_labels)
-    
-    def __getitem__(self, idx):
-        video_path = os.path.join(self.video_dir, self.video_labels.iloc[idx, 0])
-        label = self.video_labels.iloc[idx, 1]
-        # Resize the video to 240 x 320 pixels 30 frames per second if it hasn't been done already
-        if not os.path.exists(video_path[:-4] + "_resize.mp4"):
-            data_preprocessing(video_path)
-        video, audio, info = read_video(video_path[:-4] + "_resize.mp4", pts_unit='sec')
-        video = video.to(dtype=torch.float32)
-        sample = {'video': video, 'audio': audio, 'label': label}
-        if self.transform:
-            sample = self.transform(sample)
-        if self.target_transform:
-            sample = self.target_transform(sample)
-        return sample
-
-
-# with open("/dcs/large/u2102661/CS310/datasets/anomaly_detection/train/normal/labels.csv", "w") as f:
-#     writer = csv.writer(f)
-#     writer.writerow(["video", "label"])
-#     for video in os.listdir("/dcs/large/u2102661/CS310/datasets/anomaly_detection/train/normal"):
-#         if video.endswith(".mp4"):
-#             writer.writerow([video, 0])
-# with open("/dcs/large/u2102661/CS310/datasets/anomaly_detection/train/anomaly/labels.csv", "w") as f:
-#     writer = csv.writer(f)
-#     writer.writerow(["video", "label"])
-#     for video in os.listdir("/dcs/large/u2102661/CS310/datasets/anomaly_detection/train/anomaly"):
-#         if video.endswith(".mp4"):
-#             writer.writerow([video, 1])
-# with open("/dcs/large/u2102661/CS310/datasets/anomaly_detection/test/normal/labels.csv", "w") as f:
-#     writer = csv.writer(f)
-#     writer.writerow(["video", "label"])
-#     for video in os.listdir("/dcs/large/u2102661/CS310/datasets/anomaly_detection/test/normal"):
-#         if video.endswith(".mp4"):
-#             writer.writerow([video, 0])
-# with open("/dcs/large/u2102661/CS310/datasets/anomaly_detection/test/anomaly/labels.csv", "w") as f:
-#     writer = csv.writer(f)
-#     writer.writerow(["video", "label"])
-#     for video in os.listdir("/dcs/large/u2102661/CS310/datasets/anomaly_detection/test/anomaly"):
-#         if video.endswith(".mp4"):
-#             writer.writerow([video, 1])
-# with open("/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/normal/labels.csv", "w") as f:
-#     writer = csv.writer(f)
-#     writer.writerow(["video", "label"])
-#     for video in os.listdir("/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/normal"):
-#         if video.endswith(".mp4"):
-#             writer.writerow([video, 0])
-# with open("/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/anomaly/labels.csv", "w") as f:
-#     writer = csv.writer(f)
-#     writer.writerow(["video", "label"])
-#     for video in os.listdir("/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/anomaly"):
-#         if video.endswith(".mp4"):
-#             writer.writerow([video, 1])
-
-train_normal_dataset = NormalDataset(
-    annotation_file="/dcs/large/u2102661/CS310/datasets/anomaly_detection/train/normal/labels.csv",
-    video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/train/normal",
-    is_test=False)
-
-train_anomaly_dataset = AnomalyDataset(
-    annotation_file="/dcs/large/u2102661/CS310/datasets/anomaly_detection/train/anomaly/labels.csv",
-    video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/train/anomaly",
-    is_test=False)
-
-test_normal_dataset = NormalDataset(
-    annotation_file="/dcs/large/u2102661/CS310/datasets/anomaly_detection/test/normal/labels.csv",
-    video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/test/normal",
-    is_test=True)
-
-test_anomaly_dataset = AnomalyDataset(
-    annotation_file="/dcs/large/u2102661/CS310/datasets/anomaly_detection/test/anomaly/labels.csv",
-    video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/test/anomaly",
-    is_test=True)
-
-validation_normal_dataset = NormalDataset(
-    annotation_file="/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/normal/labels.csv",
-    video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/normal",
-    is_test=False)
-
-validation_anomaly_dataset = AnomalyDataset(
-    annotation_file="/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/anomaly/labels.csv",
-    video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/anomaly",
-    is_test=False)
-
-device = (
-    "cuda" 
-    if torch.cuda.is_available()  
-    else "cpu"
-)
-torch.cuda.empty_cache()
-print(f"Using {device} device")
-
-train_normal_dataloader = DataLoader(train_normal_dataset, batch_size=1, shuffle=True)
-train_anomaly_dataloader = DataLoader(train_anomaly_dataset, batch_size=1, shuffle=True)
-test_normal_dataloader = DataLoader(test_normal_dataset, batch_size=1, shuffle=True)
-test_anomaly_dataloader = DataLoader(test_anomaly_dataset, batch_size=1, shuffle=True)
-validation_normal_dataloader = DataLoader(validation_normal_dataset, batch_size=1, shuffle=True)
-validation_anomaly_dataloader = DataLoader(validation_anomaly_dataset, batch_size=1, shuffle=True)
-
+            label = self.target_transform(label)
+        return video, label, video_name
 
 class MyAnomalyDetectionModel(nn.Module):
     def __init__(self, parent_model):
@@ -230,11 +117,30 @@ class MyAnomalyDetectionModel(nn.Module):
         x = self.sigmoid(x)
         return x
 
-model = models.video.r3d_18(pretrained=True)
-my_model = MyAnomalyDetectionModel(model).to(device)
-my_model.parent_model.requires_grad_(False)
+
+# test_normal_dataset = NormalDataset(
+#     annotation_file="/dcs/large/u2102661/CS310/datasets/anomaly_detection/test/normal/labels.csv",
+#     video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/test/normal",
+#     is_test=True)
+
+# test_anomaly_dataset = AnomalyDataset(
+#     annotation_file="/dcs/large/u2102661/CS310/datasets/anomaly_detection/test/anomaly/labels.csv",
+#     video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/test/anomaly",
+#     is_test=True)
 
 
+
+# print(f"Using {device} device")
+
+# test_anomaly_dataloader = DataLoader(test_anomaly_dataset, batch_size=1, shuffle=True)
+# test_normal_dataloader = DataLoader(test_normal_dataset, batch_size=1, shuffle=True)
+
+
+# This is the loss function for the model which is a combination of the following:
+    # 1. The hinge loss for the max anomaly score and the max normal score
+    # 2. The temporal smoothness of the anomaly scores
+    # 3. The temporal sparsity of the anomaly scores
+    # 4. The matrix norm of the model parameters (only the layers that require a gradient)
 def loss_function(model, anomalies, normals, batch_size=32):
     lambda_temporal_smoothness = 0.001
     lambda_temporal_sparsity = 0.001
@@ -258,10 +164,13 @@ def loss_function(model, anomalies, normals, batch_size=32):
             temp.append(torch.pow(anomaly_bag[i] - anomaly_bag[i + 1], 2))
         temporal_smoothness = sum(temp)
 
+        # Calculate the matrix norm for everything that requires a gradient
+        for param in model.parameters():
+            if param.requires_grad:
+                loss += torch.norm(param, p=2)
+
         loss += nn.functional.relu(1.0 - max_anomaly_score + max_normal_score) + lambda_temporal_smoothness * temporal_smoothness + lambda_temporal_sparsity * temporal_sparsity
     return loss / batch_size
-# print(loss_function(my_model, [0.5, 0.1], [0.1, 0.2]))
-
 
 def resize_all_clips(in_dir):
     for video in os.listdir(in_dir):
@@ -275,29 +184,73 @@ def resize_all_clips(in_dir):
 # resize_all_clips("/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/normal")
 # resize_all_clips("/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/anomaly")
 
-loss_fun = loss_function
-optimiser = torch.optim.Adam(my_model.parameters(), lr=0.001)
+transform_main = Compose([
+    (lambda x: x / 255.0),
+    Normalize(mean=[0.43216, 0.394666, 0.37645], std=[0.22803, 0.22145, 0.216989]),
+    RandomHorizontalFlip(p=0.5),
+    RandomRotation(degrees=15)
+])
+transform_normalise = Compose([
+    (lambda x: x / 255.0),
+    Normalize(mean=[0.43216, 0.394666, 0.37645], std=[0.22803, 0.22145, 0.216989])
+])
+train_normal_dataset = NormalDataset(
+    annotation_file="/dcs/large/u2102661/CS310/datasets/anomaly_detection/train/normal/labels.csv",
+    video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/train/normal",
+    is_test=False, 
+    transform=transform_main
+)
+train_anomaly_dataset = AnomalyDataset(
+    annotation_file="/dcs/large/u2102661/CS310/datasets/anomaly_detection/train/anomaly/labels.csv",
+    video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/train/anomaly",
+    is_test=False, 
+    transform=transform_main
+)
+validation_normal_dataset = NormalDataset(
+    annotation_file="/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/normal/labels.csv",
+    video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/normal",
+    is_test=False, 
+    transform=transform_normalise
+)
+validation_anomaly_dataset = AnomalyDataset(
+    annotation_file="/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/anomaly/labels.csv",
+    video_dir="/dcs/large/u2102661/CS310/datasets/anomaly_detection/validation/anomaly",
+    is_test=False, 
+    transform=transform_normalise
+)
+train_normal_dataloader = DataLoader(train_normal_dataset, batch_size=1, shuffle=True)
+train_anomaly_dataloader = DataLoader(train_anomaly_dataset, batch_size=1, shuffle=True)
+validation_normal_dataloader = DataLoader(validation_normal_dataset, batch_size=1, shuffle=True)
+validation_anomaly_dataloader = DataLoader(validation_anomaly_dataset, batch_size=1, shuffle=True)
+device = (
+    "cuda" 
+    if torch.cuda.is_available()  
+    else "cpu"
+)
+torch.cuda.empty_cache()
 
-# optimiser = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
 
 def train(anomaly_dataloader, normal_dataloader, model , loss_fun, optimiser, batch_size=4):
     print("Starting training")
     size = len(anomaly_dataloader)
     anomaly_scores = []
     normal_scores = []
-    percentage_completes = 0
-    frames_per_clip = 32
-    for batch, (anomaly_features, normal_features) in enumerate(zip(anomaly_dataloader, normal_dataloader)):
-        anomaly_features = anomaly_features["video"].to(device)
-        normal_features = normal_features["video"].to(device)
+    videos_complete = 0
+    frames_per_clip = 16
+    for batch, (anomaly_data, normal_data) in enumerate(zip(anomaly_dataloader, normal_dataloader)):
+        (anomaly_features, anomaly_label, anomaly_name) = anomaly_data
+        anomaly_features = anomaly_features.to(device)
+        (normal_features, normal_label, normal_data) = normal_data
+        normal_features = normal_features.to(device)
 
         this_anomaly_scores = []
         # Split the anomaly clips into 16 frame clips and make predictions on each clip
         if anomaly_features.shape[1] < frames_per_clip:
             # We cannot make a fold so we just make a prediction on the whole clip
-            this_anomaly_scores.append(model(anomaly_features.permute(0, 4, 1, 2, 3)))
+            this_anomaly_scores.append(model(anomaly_features.permute(0, 2, 1, 3, 4)))
         else:
-            anomaly_clips = anomaly_features.unfold(1, frames_per_clip, frames_per_clip).permute(0, 4, 1, 5, 2, 3)
+            anomaly_clips = anomaly_features.unfold(1, frames_per_clip, frames_per_clip).permute(0, 2, 1, 5, 3, 4)
+
             for i in range(anomaly_clips.shape[2]):
                 this_anomaly_scores.append(model(anomaly_clips[:, :, i, :, :, :]))
 
@@ -305,15 +258,16 @@ def train(anomaly_dataloader, normal_dataloader, model , loss_fun, optimiser, ba
         this_normal_scores = []
         if normal_features.shape[1] < frames_per_clip:
             # We cannot make a fold so we just make a prediction on the whole clip
-            this_normal_scores.append(model(normal_features.permute(0, 4, 1, 2, 3)))
+            this_normal_scores.append(model(normal_features.permute(0, 2, 1, 3, 4)))
         else:
-            normal_clips = normal_features.unfold(1, frames_per_clip, frames_per_clip).permute(0, 4, 1, 5, 2, 3)
+            normal_clips = normal_features.unfold(1, frames_per_clip, frames_per_clip).permute(0, 2, 1, 5, 3, 4)
             for i in range(normal_clips.shape[2]):
                 this_normal_scores.append(model(normal_clips[:, :, i, :, :, :]))
 
         anomaly_scores.append(this_anomaly_scores)
         normal_scores.append(this_normal_scores)
 
+        videos_complete += 1
         # # We need to calculate the loss on the batch
         if batch % batch_size == 0: 
             loss = loss_fun(model, anomaly_scores, normal_scores, batch_size=batch_size)
@@ -323,31 +277,36 @@ def train(anomaly_dataloader, normal_dataloader, model , loss_fun, optimiser, ba
             optimiser.zero_grad()
 
             # Print progress
-            loss, percentage_completes = loss.item(),  percentage_completes + len(anomaly_scores)
-            print(f"loss: {loss:>7f}  [{percentage_completes:>5d}/{size:>5d}]")
+            loss = loss.item()
+            print(f"loss: {loss:>7f}  [{videos_complete:>5d}/{size:>5d}]")
             # Reset the lists 
             anomaly_scores = []
             normal_scores = []
     print("Finished training")
 
 def validate(anomaly_dataloader, normal_dataloader, model, loss_fun, batch_size=4): 
+    print("Starting validation")
+    size = len(anomaly_dataloader)
+    videos_complete = 0
     anomaly_scores = []
     normal_scores = []
-    frames_per_clip = 32
+    frames_per_clip = 16
     total_loss = 0
     print("===========================================validating===========================================")
     with torch.no_grad(): # We don't need to calculate gradients for validation
-        for batch, (anomaly_video, normal_video) in enumerate(zip(anomaly_dataloader, normal_dataloader)):
-            anomaly_video = anomaly_video["video"].to(device)
-            normal_video = normal_video["video"].to(device)
+        for batch, (anomaly_data, normal_data) in enumerate(zip(anomaly_dataloader, normal_dataloader)):
+            (anomaly_video, anomaly_label, anomaly_name) = anomaly_data
+            anomaly_video = anomaly_video.to(device)
+            (normal_video, normal_label, normal_name) = normal_data
+            normal_video = normal_video.to(device)
 
             this_anomaly_scores = []
             # Split the anomaly clips into 16 frame clips and make predictions on each clip
             if anomaly_video.shape[1] < frames_per_clip:
                 # We cannot make a fold so we just make a prediction on the whole clip
-                this_anomaly_scores.append(model(anomaly_video.permute(0, 4, 1, 2, 3)))
+                this_anomaly_scores.append(model(anomaly_video.permute(0, 2, 1, 3, 4)))
             else:
-                anomaly_clips = anomaly_video.unfold(1, frames_per_clip, frames_per_clip).permute(0, 4, 1, 5, 2, 3)
+                anomaly_clips = anomaly_video.unfold(1, frames_per_clip, frames_per_clip).permute(0, 2, 1, 5, 3, 4)
                 for i in range(anomaly_clips.shape[2]):
                     this_anomaly_scores.append(model(anomaly_clips[:, :, i, :, :, :]))
             
@@ -355,21 +314,22 @@ def validate(anomaly_dataloader, normal_dataloader, model, loss_fun, batch_size=
             # Split the normal clips into 16 frame clips and make predictions on each clip
             if normal_video.shape[1] < frames_per_clip:
                 # We cannot make a fold so we just make a prediction on the whole clip
-                this_normal_scores.append(model(normal_video.permute(0, 4, 1, 2, 3)))
+                this_normal_scores.append(model(normal_video.permute(0, 2, 1, 3, 4)))
             else:
-                normal_clips = normal_video.unfold(1, frames_per_clip, frames_per_clip).permute(0, 4, 1, 5, 2, 3)
+                normal_clips = normal_video.unfold(1, frames_per_clip, frames_per_clip).permute(0, 2, 1, 5, 3, 4)
                 for i in range(normal_clips.shape[2]):
                     this_normal_scores.append(model(normal_clips[:, :, i, :, :, :]))
             
             anomaly_scores.append(this_anomaly_scores)
             normal_scores.append(this_normal_scores)
 
+            videos_complete += 1
             if batch % batch_size == 0: 
                 loss = loss_fun(model, anomaly_scores, normal_scores, batch_size=batch_size)
                 # Print progress
                 loss = loss.item()
                 total_loss += loss
-                print(f"loss: {loss:>7f} [{batch:>5d}/{len(anomaly_dataloader):>5d}]")
+                print(f"loss: {loss:>7f} [{videos_complete:>5d}/{size:>5d}]")
                 # Reset the lists 
                 anomaly_scores = []
                 normal_scores = []
@@ -379,36 +339,48 @@ def validate(anomaly_dataloader, normal_dataloader, model, loss_fun, batch_size=
 def save_model(model, path):
     torch.save(model, path)
 
-# def main():
-#     print("Starting main")
+def main():
+    model = models.video.r3d_18(pretrained=True)
+    my_model = MyAnomalyDetectionModel(model).to(device)
+    my_model.parent_model.requires_grad_(False)
+    loss_fun = loss_function
+    optimiser = torch.optim.Adam(my_model.parameters(), lr=0.001)
 
+    params = list(my_model.parameters())
+    print(params[-1])
+    print(params[-2])
 
+    best_total_loss = float(sys.maxsize)
+    best_epoch = 0
+    number_since_best = 0
+    epoch_loss = 0
 
+    # Open csv to write the loss to for each epoch
+    with open("/dcs/large/u2102661/CS310/models/anomaly_detection/loss.csv", "w", newline="") as csvfile:
+        csv_file = csv.DictWriter(csvfile, fieldnames=["epoch", "total loss"])
+        csv_file.writeheader()
+        for epoch in range(150):
+            print(f"Epoch {epoch + 1}\n-------------------------------")
+            train(train_anomaly_dataloader, train_normal_dataloader, my_model, loss_fun, optimiser)
+            epoch_loss = validate(validation_anomaly_dataloader, validation_normal_dataloader, my_model, loss_fun)
+            if epoch_loss < best_total_loss:
+                best_total_loss = epoch_loss
+                number_since_best = 0
+                best_epoch = epoch 
+                save_model(my_model, "/dcs/large/u2102661/CS310/models/anomaly_detection/best_model.pt")
+            else: 
+                number_since_best += 1
+            save_model(my_model, "/dcs/large/u2102661/CS310/models/anomaly_detection/last_model.pt")
+            csv_file.writerow({"epoch": epoch + 1, "total loss": epoch_loss})
+            if number_since_best > 20:
+                print("Stopping early as no improvement in 20 epochs")
+                print(f"Best total loss: {best_total_loss} at epoch {best_epoch}")
+                break
+    print("Done!")
+    
+    params = list(my_model.parameters())
+    print(params[-1])
+    print(params[-2])
 
-params = list(my_model.parameters())
-print(params[-1])
-print(params[-2])
-
-best_total_loss = float(sys.maxsize)
-epoch_loss = 0
-
-# epochs for 10 hours is 75 
-# epochs for 12 hours is 90
-for epoch in range(90):
-    print(f"Epoch {epoch + 1}\n-------------------------------")
-    train(train_anomaly_dataloader, train_normal_dataloader, my_model, loss_fun, optimiser)
-    epoch_loss = validate(validation_anomaly_dataloader, validation_normal_dataloader, my_model, loss_fun)
-    if epoch_loss < best_total_loss:
-        best_total_loss = epoch_loss
-        save_model(my_model, "/dcs/large/u2102661/CS310/models/anomaly_detection/best_model.pt")
-    save_model(my_model, "/dcs/large/u2102661/CS310/models/anomaly_detection/last_model.pt")
-
-# # Save the model
-# torch.save(my_model, "/dcs/large/u2102661/CS310/models/anomaly_detection/model_3.pt")
-
-params = list(my_model.parameters())
-print(params[-1])
-print(params[-2])
-
-# if __name__ == "__main__":
-#     main()
+if __name__ == "__main__":
+    main()
