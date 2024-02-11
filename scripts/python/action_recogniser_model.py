@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from torchvision import models
 from torchvision.io import read_video, VideoReader
-from torchvision.transforms import Normalize, Resize, ToTensor, Compose, RandomHorizontalFlip, RandomRotation, ColorJitter
+from torchvision.transforms import Normalize, Resize, ToTensor, Compose, RandomHorizontalFlip, RandomRotation, ColorJitter, v2
 
 
 class ActionRecogniserDataset(Dataset):
@@ -36,6 +36,34 @@ class ActionRecogniserDataset(Dataset):
         if self.target_transform:
             label = self.target_transform(label)
         video = video.permute(1, 0, 2, 3)
+        return video, label, video_name
+
+class ActionRecogniserDatasetFullVideoClips(Dataset):
+    def __init__(self, annotation_file, video_dir, transform=None, target_transform=None):
+        self.annotation_file = pd.read_csv(annotation_file)
+        self.video_dir = video_dir
+        self.transform = transform
+        self.target_transform = target_transform
+
+    def __len__(self):
+        return len(self.annotation_file)
+    
+    def __getitem__(self, idx):
+        video_path = os.path.join(self.video_dir, self.annotation_file.iloc[idx, 0])
+        video_name = self.annotation_file.iloc[idx, 0]
+        video, audio, info = read_video(video_path, pts_unit='sec')
+        video = video.to(device)
+        video = video.permute(0, 3, 1, 2)
+        # video = video.to(dtype=torch.float32)
+        print(video.shape)
+        label = (self.annotation_file.iloc[idx, 1], self.annotation_file.iloc[idx, 2])
+        if self.transform:
+            video = self.transform(video)
+        if self.target_transform:
+            label = self.target_transform(label)
+        video = video.permute(1, 0, 2, 3)
+        # We are going to unfold the video into 16 frame clips
+        # video = video.unfold(1, 16, 16).permute(0, 2, 1, 3, 4)
         return video, label, video_name
 
 # There is a particular error with the r3d_18 model where a flatten layer is missing when you call the children() method
@@ -79,6 +107,7 @@ class ActionRecogniserModel(nn.Module):
         return x
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Using {device} device")
 
 transform_main = Compose([
     (lambda x: x / 255),
@@ -99,7 +128,7 @@ transform1 = Compose([
 train_data = ActionRecogniserDataset(
     annotation_file="/dcs/large/u2102661/CS310/datasets/activity_recogniser/train/labels.csv",
     video_dir="/dcs/large/u2102661/CS310/datasets/activity_recogniser/train",
-    is_test=False, #
+    is_test=False, 
     transform=transform_main
 )
 test_data = ActionRecogniserDataset(
@@ -114,8 +143,6 @@ validate_data = ActionRecogniserDataset(
     is_test=True, 
     transform=transform1
 )
-
-
 
 # =============================================================================
 # Calculate the class weights for the loss function
@@ -266,128 +293,259 @@ def validate(model, test_loader, batch_size=4):
     print(f"full f2 score: {full_f2_score:>7f}")
 
     return full_f1_score, full_f2_score
+
+def resize_video(input_tensor, size):
+    return torch.stack([v2.Resize(size)(input_tensor[i, :, :, :, :]) for i in range(input_tensor.shape[0])], dim=0) 
+
+def evaluate(model, test_loader, batch_stize=16):
+    model.eval()
+    print("Evaluating...")
+    size = len(test_loader)
+    number_completed = 0
+    true_positives = 0
+    true_negatives = 0
+    false_positives = 0
+    false_negatives = 0
+    with open("/dcs/large/u2102661/CS310/model_evaluation/action_recogniser/evaluation.csv", 'w', newline='') as csvfile:
+        csv_file = csv.DictWriter(csvfile, fieldnames=["video_name", "output", "target"])
+        csv_file.writeheader()
+        with torch.no_grad():
+            for batch_idx, (data, target, video_name) in enumerate(test_loader):
+                data, target = data.to(device), target.to(device)
+                target = target.unsqueeze(1).to(dtype=torch.float32)
+                output = model(data)
+                for i in range(len(output)):
+                    if output[i] >= 0.5 and target[i] == 1:
+                        true_positives += 1
+                    elif output[i] >= 0.5 and target[i] == 0:
+                        false_positives += 1
+                    elif output[i] < 0.5 and target[i] == 1:
+                        false_negatives += 1
+                    elif output[i] < 0.5 and target[i] == 0:
+                        true_negatives += 1
+                number_completed += len(data)
+                for i in range(len(output)):
+                    csv_file.writerow({"video_name": video_name[i], "output": output[i].item(), "target": target[i].item()})
+                print(f"batch size: {len(data)}  [{number_completed:>5d}/{size:>5d}]")
+    print(f"true positives: {true_positives}")
+    print(f"true negatives: {true_negatives}")
+    print(f"false positives: {false_positives}")
+    print(f"false negatives: {false_negatives}")
+    f1_score = 0
+    f2_score = 0
+    recall = 0
+    precision = 0
+    if true_positives + false_negatives != 0:
+        recall = true_positives / (true_positives + false_negatives)
+    if true_positives + false_positives != 0:
+        precision = true_positives / (true_positives + false_positives)
+    if precision + recall != 0:
+        f1_score = 2 * (precision * recall / (precision + recall))
+        f2_score = 5 * (precision * recall / (4 * precision + recall))
+    with open("/dcs/large/u2102661/CS310/model_evaluation/action_recogniser/results.csv", 'w', newline='') as csvfile:
+        csv_file = csv.DictWriter(csvfile, fieldnames=["true_positives", "true_negatives", "false_positives", "false_negatives", "recall", "precision", "f1_score", "f2_score"])
+        csv_file.writeheader()
+        csv_file.writerow({
+            "true_positives": true_positives,
+            "true_negatives": true_negatives,
+            "false_positives": false_positives,
+            "false_negatives": false_negatives,
+            "recall": recall, 
+            "precision": precision, 
+            "f1_score": f1_score, 
+            "f2_score": f2_score
+        })
+    
+def full_video_clips_evaluate(model, dir_to_test):
+    model.eval()
+    print("Testing full video clips...")
+
+    full_length_clip_transform = Compose([
+        (lambda x: x / 255),
+        Normalize(mean=[0.43216, 0.394666, 0.37645], std=[0.22803, 0.22145, 0.216989], inplace=True)
+    ])
+
+    def transform_csv_to_object(in_path):
+        output_file = os.path.join(in_path, "tackles.csv")
+        fields = ["video_name", "start_frame", "end_frame"]
+        data = {}
+        with open(output_file, 'r', newline='') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                if row["video_name"] not in data:
+                    data[row["video_name"]] = []
+                data[row["video_name"]].append((int(row["start_frame"]), int(row["end_frame"])))
+        return data
+    
+    tackle_data = transform_csv_to_object(dir_to_test)
+
+    with open("/dcs/large/u2102661/CS310/model_evaluation/action_recogniser/full_video_clips.csv", 'w', newline='') as csvfile:
+        csv_file = csv.DictWriter(csvfile, fieldnames=["video_name", "frame_number", "output"])
+        csv_file.writeheader()
+        for video_name in tackle_data:
+            video_path = os.path.join(dir_to_test, video_name)
+            
+            # Read the video and split it into 16 frame clips 
+            video, audio, info = read_video(video_path, pts_unit='sec')
+            video = video.to(device)
+            video = video.permute(0, 3, 1, 2)
+            print(video.shape)
+            
+            # unfold the video into 16 frame clips that overlap 
+            video = video.unfold(0, 16, 1).permute(1, 0, 4, 2, 3)
+
+            print("video shape: ", video.shape)
+            concat_videos = None
+            # Implementing our own batches of 16
         
+            for i in range(0, video.shape[1], 16):
+                if i + 16 > video.shape[1]:
+                    concat_videos = torch.stack([video[:, i + j, :, :, :] for j in range(0, video.shape[1] - i)], dim = 0)
+                    print(concat_videos.shape)
+                else:
+                    concat_videos = torch.stack([video[:, i + j , :, :, :] for j in range(16)], dim = 0)
+                    print(concat_videos.shape)
+
+                # Apply the transform to the video
+                float_video = concat_videos.to(dtype=torch.float32)
+                float_video = float_video.permute(0, 2, 1, 3, 4)
+                resized_video = resize_video(float_video, (224, 224))
+                transformed_video = full_length_clip_transform(resized_video)
+                transformed_video = transformed_video.permute(0, 2, 1, 3, 4)
+                print(transformed_video.shape)
+
+                del float_video
+                del resized_video
+                del concat_videos
+                print(torch.cuda.memory_allocated() / 1024 ** 3)
+
+                with torch.no_grad():
+                    output = model(transformed_video)
+                    print(output)
+
+                    for j in range(len(output)):
+                        csv_file.writerow({"video_name": video_name, "frame_number": i + j, "output": output[j].item()})
+
+                del transformed_video
+                del output
+                print(torch.cuda.memory_allocated() / 1024 ** 3)
+
+            del video
+    print("Done testing full video clips")
+
+
+def write_new_films_with_predictions(eval_csv, video_dir):
+
+    def get_data_object(in_path):
+        output_file = in_path
+        fields = ["video_name", "frame_number", "output"]
+        data = {}
+        with open(output_file, 'r', newline='') as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                if row["video_name"] not in data:
+                    data[row["video_name"]] = []
+                data[row["video_name"]].append((int(row["frame_number"]), float(row["output"])))
+        return data
+
+    eval_data = get_data_object(eval_csv)
+
+    print("Writing new videos with predictions...")
+
+    for video_name in eval_data:
+        cv2_video = cv2.VideoCapture(os.path.join(video_dir, video_name))
+        fps = cv2_video.get(cv2.CAP_PROP_FPS)
+        width = int(cv2_video.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cv2_video.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        output_file = "/dcs/large/u2102661/CS310/model_evaluation/action_recogniser/" + video_name[:-4] + "_output.mp4" 
+        out = cv2.VideoWriter(output_file, fourcc, fps, (width, height))
+
+        while cv2_video.isOpened():
+            ret, frame = cv2_video.read()
+            if not ret:
+                break
+            frame_number = int(cv2_video.get(cv2.CAP_PROP_POS_FRAMES))
+            if frame_number <= len(eval_data[video_name]):
+                output = eval_data[video_name][(frame_number - 1)][1]
+                if output >= 0.5:
+                    frame = cv2.putText(frame, "Tackle prediction: " + str(output), (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                    # cv2.imwrite(os.path.join("/dcs/large/u2102661/CS310/model_evaluation/action_recogniser/frames", video_name[:-4] + f"_{frame_number - 1}.jpg"), frame)
+                    # print("Done")
+                elif output < 0.5:
+                    frame = cv2.putText(frame, "Tackle prediction: " + str(output), (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+                    # cv2.imwrite(os.path.join("/dcs/large/u2102661/CS310/model_evaluation/action_recogniser/frames", video_name[:-4] + f"_{frame_number - 1}.jpg"), frame)
+                    # print("Done")
+            out.write(frame)
+
+        cv2_video.release()
+        out.release()
+    cv2.destroyAllWindows()
+
 def save_model(model, path):
     torch.save(model, path)
 
-def main():
-    torch.cuda.empty_cache()
-    model = models.video.r3d_18(pretrained=True)
-    my_model = ActionRecogniserModel(model, "r3d_18").to(device)
-    my_model.parent_model.requires_grad_(False)
-    best_f1 = -1
-    best_f2 = -1
-    number_since_best = 0
-    best_epoch = 0
-
-    # Print initial weights of last layer
-    params = list(my_model.parameters())
-    print(params[-2])
-    print(params[-1])
-
-    # Freeze the weights of the parent model
-    # loss_fun = nn.BCELoss(reduction="none")
-    optimizer = torch.optim.Adam(my_model.parameters(), lr = 0.001)
-
+def main(is_test=False, parent_model_name="r3d_18"):
+    # Create the data loaders
     train_loader = DataLoader(train_data, batch_size=16, shuffle=True)
     test_loader = DataLoader(test_data, batch_size=16, shuffle=True)
     validate_loader = DataLoader(validate_data, batch_size=16, shuffle=True)
 
-    with open("/dcs/large/u2102661/CS310/models/activity_recogniser/loss.csv", 'w', newline='') as csvfile:
-        csv_file = csv.DictWriter(csvfile, fieldnames=["epoch", "loss", "f1", "f2"])
-        csv_file.writeheader()
-        # 1 epoch is about 5 minutes roughly 12 epochs per hour
-        for epoch in range(100):
-            print(f"Epoch {epoch + 1}\n-------------------------------")
-            average_loss = train(my_model, train_loader, loss_function, optimizer, batch_size=16)
-            epoch_f1, epoch_f2 =  validate(my_model, validate_loader, batch_size=16)
-            if epoch_f1 > best_f1:
-                best_f1 = epoch_f1
-                number_since_best = 0
-                best_epoch = epoch
-                save_model(my_model, "/dcs/large/u2102661/CS310/models/activity_recogniser/best.pt")
-            else: 
-                number_since_best += 1
-            save_model(my_model, "/dcs/large/u2102661/CS310/models/activity_recogniser/last.pt")
-            csv_file.writerow({"epoch": epoch, "loss": average_loss, "f1": epoch_f1, "f2": epoch_f2})
-            if number_since_best > 50:
-                print("Stopping early as no improvement in 50 epochs")
-                print(f"Best f1: {best_f1} at epoch {best_epoch}")
-                break
-    print("Done!")
+    if is_test:
+        # torch.cuda.empty_cache()
+        if parent_model_name == "r3d_18":
+            my_model = torch.load("/dcs/large/u2102661/CS310/models/activity_recogniser/r3d_18/run4/best.pt")
+        my_model = my_model.to(device)
+        # evaluate(my_model, test_loader, batch_stize=16)
+        print("model loaded")
+        # full_video_clips_evaluate(my_model, "/dcs/large/u2102661/CS310/datasets/activity_recogniser/full_length_clips/")
+        write_new_films_with_predictions("/dcs/large/u2102661/CS310/model_evaluation/action_recogniser/full_video_clips.csv", "/dcs/large/u2102661/CS310/datasets/activity_recogniser/full_length_clips")
+    else:
+        # Create the model
+        model = models.video.r3d_18(pretrained=True)
+        my_model = ActionRecogniserModel(model, "r3d_18").to(device)
+        # Freeze the weights of the parent model
+        my_model.parent_model.requires_grad_(False)
+        best_f1 = -1
+        best_f2 = -1
+        number_since_best = 0
+        best_epoch = 0
+        # Print initial weights of last layer
+        params = list(my_model.parameters())
+        print(params[-2])
+        print(params[-1])
 
-    # Print final weights of last layer
-    params = list(my_model.parameters())
-    print(params[-2])
-    print(params[-1])
+        optimizer = torch.optim.Adam(my_model.parameters(), lr = 0.001)
 
-def temp():
-    model = models.video.r3d_18(pretrained=True)
-    my_model = ActionRecogniserModel(model, "r3d_18").to(device)
-    my_model.parent_model.requires_grad = False
+        # This is the training loop
+        with open("/dcs/large/u2102661/CS310/models/activity_recogniser/loss.csv", 'w', newline='') as csvfile:
+            csv_file = csv.DictWriter(csvfile, fieldnames=["epoch", "loss", "f1", "f2"])
+            csv_file.writeheader()
+            # 1 epoch is about 5 minutes roughly 12 epochs per hour
+            for epoch in range(100):
+                print(f"Epoch {epoch + 1}\n-------------------------------")
+                average_loss = train(my_model, train_loader, loss_function, optimizer, batch_size=16)
+                epoch_f1, epoch_f2 =  validate(my_model, validate_loader, batch_size=16)
+                if epoch_f1 > best_f1:
+                    best_f1 = epoch_f1
+                    number_since_best = 0
+                    best_epoch = epoch
+                    save_model(my_model, "/dcs/large/u2102661/CS310/models/activity_recogniser/best.pt")
+                else: 
+                    number_since_best += 1
+                save_model(my_model, "/dcs/large/u2102661/CS310/models/activity_recogniser/last.pt")
+                csv_file.writerow({"epoch": epoch, "loss": average_loss, "f1": epoch_f1, "f2": epoch_f2})
+                if number_since_best > 50:
+                    print("Stopping early as no improvement in 50 epochs")
+                    print(f"Best f1: {best_f1} at epoch {best_epoch}")
+                    break
+        print("Done!")
 
-    temp_data = ActionRecogniserDataset(
-        annotation_file="/dcs/large/u2102661/CS310/datasets/activity_recogniser/temp/labels.csv",
-        video_dir="/dcs/large/u2102661/CS310/datasets/activity_recogniser/temp",
-        is_test=False
-    )
-    temp_loader = DataLoader(temp_data, batch_size=4, shusquffle=True)
-    for batch_idx, (data, target) in enumerate(temp_loader):
-        data, target = data.to(device), target.to(device)
-        target = target.unsqueeze(1).to(dtype=torch.float32)
-
-        output = my_model(data)
-
-        TP = 0
-        TN = 0
-        FP = 0
-        FN = 0
-
-        for i in range(len(output)):
-            print(f"output: {output[i]} target: {target[i]}")
-            if output[i] >= 0.5 and target[i] == 1:
-                TP += 1
-            elif output[i] >= 0.5 and target[i] == 0:
-                FP += 1
-            elif output[i] < 0.5 and target[i] == 1:
-                FN += 1
-            elif output[i] < 0.5 and target[i] == 0:
-                TN += 1
-        
-        f1 = 0
-        
-        print(f"TP: {TP} TN: {TN} FP: {FP} FN: {FN}")
-        if (TP + FN) == 0:
-            f1 = 0
-        elif (TP + FP) == 0:
-            f1 = 0
-        else:
-            recall = TP / (TP + FN)
-            precision = TP / (TP + FP)
-            f1 = 2 * (precision * recall / (precision + recall))
-        print(f"f1: {f1}")
+        # Print final weights of last layer
+        params = list(my_model.parameters())
+        print(params[-2])
+        print(params[-1])
 
 
-        print("-------------------")
-        loss_function(output, target)
-        
-def temp2():
-    model = models.video.r3d_18(pretrained=True)
-    my_model = ActionRecogniserModel(model, "r3d_18").to(device)
-    my_model.parent_model.requires_grad_(False)
-
-    print(my_model[0].weight)
-
-    # target = torch.tensor([0,0,0,0,0,1,0,0,0,0]).to(dtype=torch.float32)
-    # output = torch.tensor([0.0, 1.0, 0.00000001, 0.12, 0.08, 0.48, 0.24, 0.01, 0.22, 0.16]).to(dtype=torch.float32)
-
-    # loss_function(output, target)
-    # for i in range(20): 
-    #     print(f"i: {i}")
-    #     if i > 10:
-    #         break
-    
 if __name__ == "__main__":
-    # main()
-    # temp()
-    temp2()
+    main(is_test=True)
