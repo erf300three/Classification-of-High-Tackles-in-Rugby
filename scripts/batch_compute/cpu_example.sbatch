@@ -16,4 +16,4 @@ source /etc/profile.d/conda.sh
 
 ## Execute your program(s) ##
 source /dcs/21/u2102661/Documents/3rdYear/CS310/Classification-of-High-Tackles-in-Rugby/venv/bin/activate
-srun python3 /dcs/21/u2102661/Documents/3rdYear/CS310/Classification-of-High-Tackles-in-Rugby/scripts/python/anomaly_detection.py
+srun python3 /dcs/21/u2102661/Documents/3rdYear/CS310/Classification-of-High-Tackles-in-Rugby/scripts/python/create_negative_clips.py --dir="/dcs/large/u2102661/CS310/datasets/full_length_games/temp4" --out="/dcs/large/u2102661/CS310/datasets/full_length_games/short_clips"
