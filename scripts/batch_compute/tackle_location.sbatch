@@ -20,5 +20,5 @@ source /etc/profile.d/conda.sh
 # module load Python/3.11.0
 
 ## This is specific to my environment, you will need to change this to your own ##
-source /dcs/21/u2102661/Documents/3rdYear/CS310/Classi  fication-of-High-Tackles-in-Rugby/venv/bin/activate
+source /dcs/21/u2102661/Documents/3rdYear/CS310/Classification-of-High-Tackles-in-Rugby/venv/bin/activate
 srun python3 /dcs/21/u2102661/Documents/3rdYear/CS310/Classification-of-High-Tackles-in-Rugby/scripts/python/tackle_location_model.py

@@ -46,11 +46,11 @@ def train_model(data_path):
         imgsz=640, 
         single_cls=True, 
         batch=8, 
-        patience=100, 
+        patience=0, 
         optimizer="Adam",
         close_mosaic=20, 
         lr0=0.001,
-        freeze=10,
+        freeze=12,
         dropout=0.3
     )
     return results
