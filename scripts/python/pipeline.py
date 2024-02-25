@@ -1,0 +1,211 @@
+import os
+import sys
+import cv2
+import csv
+import pandas as pd
+import numpy as np
+import torch
+from ultralytics import YOLO
+
+from action_recogniser_model import ActionRecogniserModel, action_prediction
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+def pipeline(video_path):
+    # Load the video
+    cap = cv2.VideoCapture(video_path)
+
+    # Load the model
+    action_model = torch.load("/dcs/large/u2102661/CS310/models/activity_recogniser/r3d_18/run4/best.pt", map_location=device).to(device)
+
+    # Determine if any of the frames are likely to contain a tackle using our action recogniser model
+    frames = action_prediction(action_model, video_path)
+
+    
+    if len(frames) == 0:
+        print("No tackles detected")
+        return
+    
+    # We now need to pad out the selected frame by 16 frames either side to ensure that we have enough frames to accurately localise the tackle
+    
+    buffer = 10
+    tackle_clips = []
+    for frame in frames:
+        temp = []
+        for i in range(frame - buffer, frame + buffer):
+            temp.append(i)
+        tackle_clips.append(temp)
+
+
+    print(f"Frames containing tackles: {frames}")
+
+    # Documenting the frames that contain tackles by writing them to their own video file using OpenCV  
+    for clip in tackle_clips:
+        print(f"Clips: {clip}")
+        # We want to write the frames to a new video file 
+        # Define the codec and create VideoWriter object
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        out = cv2.VideoWriter(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/tackle_clips/{video_path.split('/')[-1][:-4]}_{clip[0]}_{clip[-1]}.mp4", fourcc, fps, (width, height))
+
+        for frame in clip:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
+            ret, img = cap.read()
+            out.write(img)
+        out.release()
+
+
+    
+    # If we have detected a tackle we will use a custom YOLOv8 model to detect the bounding box of the tackle 
+    yolo = YOLO('/dcs/large/u2102661/CS310/models/tackle_location/train/weights/best.pt')
+    
+    tackle_localisation = {}
+
+    # Loop through all of the frames that we have detected a tackle in and use YOLO to localise the tackle
+    for tackle in tackle_clips:
+        for frame in tackle:
+            # Load the frame
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
+            ret, img = cap.read()
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            results = yolo.predict(img, save=False, show=False, project="/dcs/large/u2102661/CS310/model_evaluation/pipeline", name="tackle_location")
+            # Save the original frame
+            img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+            if not os.path.exists(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/tackle_frames/{video_path.split('/')[-1][:-4]}"):
+                os.makedirs(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/tackle_frames/{video_path.split('/')[-1][:-4]}")
+            cv2.imwrite(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/tackle_frames/{video_path.split('/')[-1][:-4]}/frame_{frame}.jpg", img)
+            # Plot the results on the image
+            annotated_frame = results[0].plot()
+            annotated_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR)
+            if not os.path.exists(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/tackle_location/{video_path.split('/')[-1][:-4]}"):
+                os.makedirs(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/tackle_location/{video_path.split('/')[-1][:-4]}")
+            cv2.imwrite(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/tackle_location/{video_path.split('/')[-1][:-4]}/frame_{frame}.jpg", annotated_frame)
+            # Save the bounding box results to the dictionary
+            # If for some reason the model has detected multiple tackles in a single frame we will store the bounding box with the highest confidence
+            best_confidence = 0
+            for r in results:
+                # Check if there are any bounding boxes
+                if len(r.boxes) > 0:
+                    if r.boxes[0].conf > best_confidence:
+                        best_confidence = r.boxes[0].conf
+                        tackle_localisation[frame] = [r.boxes[0].xyxy]
+
+    if len(tackle_localisation) == 0:
+        print("No tackles detected")
+        # We want to return a path to where the clipped video is stored so that the tackle can be manually reviewed
+        return
+
+
+    # We now want to take bounding boxes and use them to crop the frames to only include that region +- some padding
+    for frame in tackle_localisation:
+        print(f"Frame: {frame} Bounding box: {tackle_localisation[frame]}")
+        temp3 = tackle_localisation[frame][0].to("cpu").numpy()[0]
+        # Get each of the coordinates of the bounding box
+        x1, y1, x2, y2 = round(temp3[0]), round(temp3[1]), round(temp3[2]), round(temp3[3])
+        print(f"x1: {x1} y1: {y1} x2: {x2} y2: {y2}")
+        # Padding is 10% of the width and height of the bounding box
+        padding_x = int((x2 - x1) * 0.25)
+        padding_y = int((y2 - y1) * 0.25)
+        # Get the image that we want to crop
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame)
+        ret, img = cap.read()
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        # Prevent the padding from going outside of the image
+        new_x1 = max(0, int(x1 - padding_x))
+        new_x2 = min(img.shape[1], int(x2 + padding_x))
+        new_y1 = max(0, int(y1 - padding_y))
+        new_y2 = min(img.shape[0], int(y2 + padding_y))
+        # Crop the image
+        cropped_img = img[new_y1:new_y2, new_x1:new_x2]
+        cropped_img = cv2.cvtColor(cropped_img, cv2.COLOR_RGB2BGR)
+        # Save the cropped image
+        if not os.path.exists(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/tackle_crops/{video_path.split('/')[-1][:-4]}"):
+            os.makedirs(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/tackle_crops/{video_path.split('/')[-1][:-4]}")
+        cv2.imwrite(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/tackle_crops/{video_path.split('/')[-1][:-4]}/frame_{frame}.jpg", cropped_img)
+
+            
+    # Apply pose estimiation to the cropped images to get the poses of the players involved in the tackle
+    for frame in os.listdir(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/tackle_frames/{video_path.split('/')[-1][:-4]}"):
+        print(frame)
+        # Load the frame
+        
+        yolo = YOLO('yolov8x-pose.pt')
+        results = yolo.predict(
+            f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/tackle_frames/{video_path.split('/')[-1][:-4]}/{frame}",
+            save=False,
+            show=False,
+            imgsz=640
+        )
+        annotated_frame = results[0].plot()
+        annotated_frame = cv2.cvtColor(annotated_frame, cv2.COLOR_RGB2BGR)
+        if not os.path.exists(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/pose_estimation/{video_path.split('/')[-1][:-4]}"):
+            os.makedirs(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/pose_estimation/{video_path.split('/')[-1][:-4]}")
+        cv2.imwrite(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/pose_estimation/{video_path.split('/')[-1][:-4]}/{frame}", annotated_frame)
+        for r in results:
+            # We want to output the pose estimations have their waist or shoulder keypoints within the bounding box of the tackle
+            # Check if there is a bounding box for the frame
+            # Get the frame number of the tackle frame of the form Team1_vs_Team2_frame_XXX.
+            frame_number = int(frame.split("_")[1][:-4])
+
+
+            if frame_number in tackle_localisation:
+                # Get the coordinates of the bounding box
+                temp3 = tackle_localisation[frame_number][0].to("cpu").numpy()[0]
+                x1, y1, x2, y2 = round(temp3[0]), round(temp3[1]), round(temp3[2]), round(temp3[3])
+                
+                # # Check if there are any keypoints
+                # print("length of keypoints: ", len(r.keypoints))
+                # print("keypoints: ", r.keypoints)
+                # print("length of xy: ", len(r.keypoints[0].xy.to("cpu").numpy()))
+                # print("xy: ", r.keypoints[0].xy.to("cpu").numpy())
+                # # Compare to the shape of empty keypoints
+                # print("condition:", r.keypoints[0].xy.to("cpu").shape == (1, 0, 2))
+                if r.keypoints[0].xy.to("cpu").shape == (1, 0, 2):
+                    continue
+
+                for player_keypoint in r.keypoints:
+
+                    points = player_keypoint.xy.to("cpu").numpy()[0]
+                    print("points: ", points)
+                    # Check if the hip or shoulder keypoints are within the bounding 
+                    # The hip shoulder points are index 11 and 12 and the shoulder points are index 5 and 6
+                    left_hip = points[11]
+                    right_hip = points[12]
+                    left_shoulder = points[5]
+                    right_shoulder = points[6]
+                    # Check if the hip or shoulder keypoints are within the bounding box
+                    points_to_check = [left_hip, right_hip, left_shoulder, right_shoulder]
+                    or_gate = False
+                    for point in points_to_check:
+                        if x1 < point[0] < x2 and y1 < point[1] < y2:
+                            print(f"Point: {point} is within the bounding box")
+                            or_gate = True
+                        else:
+                            print(f"Point: {point} is not within the bounding box")
+                    if or_gate:
+                        print("Player is within the bounding box")
+                        print(points)
+            
+
+                    
+
+
+
+
+
+    # We now want to take these cropped images and use them to complete pose estimation on to get the poses of the players involved in the tackle
+    
+
+
+def main():
+    dir_path = "/dcs/large/u2102661/CS310/datasets/negative_clips"
+    for file in os.listdir(dir_path):
+        if file.endswith(".mp4"):
+            video_path = os.path.join(dir_path, file)
+            pipeline(video_path)
+    # pipeline("/dcs/large/u2102661/CS310/datasets/activity_recogniser/original_clips/Darlington_V_Sedgley_Yellow_High_Tackle1.mp4")
+
+if __name__ == "__main__":
+    main()
