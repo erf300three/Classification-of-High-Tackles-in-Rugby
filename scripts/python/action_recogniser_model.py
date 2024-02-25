@@ -2,6 +2,9 @@ import os
 import sys
 import csv
 import cv2
+import copy
+import math
+import itertools
 import numpy as np
 import pandas as pd
 import torch
@@ -11,7 +14,6 @@ from torch.utils.data import Dataset, DataLoader
 from torchvision import models
 from torchvision.io import read_video, VideoReader
 from torchvision.transforms import Normalize, Resize, ToTensor, Compose, RandomHorizontalFlip, RandomRotation, ColorJitter, v2
-
 
 class ActionRecogniserDataset(Dataset):
     def __init__(self, annotation_file, video_dir, is_test=False, transform=None, target_transform=None):
@@ -433,6 +435,104 @@ def full_video_clips_evaluate(model, dir_to_test):
             del video
     print("Done testing full video clips")
 
+# This is the function that will be used in the pipeline to predict the frames of a video that is likely to contain a tackle
+# We are again using a sliding window of 16 frames which will be split between 8 frames before and 7 frames after the current frame
+def action_prediction(model, video_path):
+    print("Predicting frames likely to contain a tackle...")
+
+    # We are going to need to read the video in chunks of 16 frames as a tensor
+    frames = []
+    # This reader is just used to get the metadata of the video so we can iterate through the frames correctly
+    reader = VideoReader(video_path, "video")
+    clip = None
+    # Our main loop which centres the sliding window
+    clips = []
+    outputs = []
+
+    for i in range(8, int(reader.get_metadata()["video"]["fps"][0] * reader.get_metadata()["video"]["duration"][0]) - 8):
+        clip = None
+        print("i: ", i)
+        print("start_pts: ", (i-8) * float(1 / reader.get_metadata()["video"]["fps"][0]))
+        print("end_pts: ", (i+7) * float(1 / reader.get_metadata()["video"]["fps"][0]))
+        
+        clip = read_video(video_path, pts_unit='sec', start_pts=(i-8) * float(1 / reader.get_metadata()["video"]["fps"][0]), end_pts=(i+7) * float(1 / reader.get_metadata()["video"]["fps"][0]))
+        print("clip shape: ", clip[0].shape)
+        # If the length of the clip is greater than 16 then we need to drop the first frames
+        if clip[0].shape[0] > 16:
+            clip = clip[0][-16:, :, :, :]
+        else: 
+            clip = clip[0]
+        clip = clip.permute(0, 3, 1, 2)
+        clip = clip.to(dtype=torch.float32)
+        clip = clip.to(device)
+        # We are going to need to transform the clip to be in the correct format for the model
+        clip = transform1(clip)
+        clip = Resize((224, 224))(clip)
+        clip = clip.permute(1, 0, 2, 3)
+        print("clip shape augmented: ", clip.shape)
+
+        clips.append(clip)
+        print("stop condition: ", i % 16)
+        if i % 16 == 7 or i == int(reader.get_metadata()["video"]["fps"][0] * reader.get_metadata()["video"]["duration"][0]) - 9:
+            # If there is less than 4 frames remain at the end then we just skip them and make no predictions on those frames 
+            if len(clips) < 4: 
+                clips = []
+                continue
+            temp = torch.stack(clips, dim=0)
+            # Delete all the entries in clip to free up memory
+            for clip in clips:
+                del clip
+            clips = temp
+            print(clips.shape)
+            with torch.no_grad():
+                output = model(clips)
+                print(output)
+            clips = []
+             
+            for j in range(len(output)):
+                outputs.append(output[j].item())
+    
+    print("Done predicting frames likely to contain a tackle")
+
+    # Now we need to write the outputs to a csv file 
+    with open(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/action_recogniser/{video_path.split('/')[-1][:-4]}.csv", 'w', newline='') as csvfile:
+        csv_file = csv.DictWriter(csvfile, fieldnames=["frame_number", "output"])
+        csv_file.writeheader()
+        for i in range(len(outputs)):
+            csv_file.writerow({"frame_number": i + 8, "output": outputs[i]})
+    
+
+    # We now want to return frames where there are 4 predictions within 16 frames that all are above 0.85
+    with open(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/action_recogniser/{video_path.split('/')[-1][:-4]}.csv", 'r', newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        outputs = []
+        for row in reader:
+            outputs.append((int(row["frame_number"]), float(row["output"])))
+
+    temp = [outputs[i] for i in range(len(outputs)) if outputs[i][1] >= 0.85]    
+    # Of these frames we want to keep ones that have another 4 frame within 16 frames of them (the group size will be at least 4)
+    def group_numbers(numbers, max_difference=16):
+        groups = []
+        for number in numbers:
+            found_group = False
+            for group in groups:
+                for member in group:
+                    if abs(member - number) <= max_difference:
+                        group.append(number)
+                        found_group = True
+                        break
+
+                    # remove this if-block if a number should be added to multiple groups
+                    if found_group:
+                        break
+            if not found_group:
+                groups.append([number])
+        return groups    
+    groups = group_numbers([i[0] for i in temp])
+
+    # As all of the frames are sequential we can just take the first frame of each group
+    return_results = [group[0] for group in groups if len(group) >= 4]
+    return return_results
 
 def write_new_films_with_predictions(eval_csv, video_dir):
 
@@ -487,6 +587,12 @@ def save_model(model, path):
 
 def main(is_test=False, parent_model_name="r3d_18"):
     # Create the data loaders
+
+    my_model = torch.load("/dcs/large/u2102661/CS310/models/activity_recogniser/r3d_18/run4/best.pt", map_location=device).to(device)
+    action_prediction(my_model, "/dcs/large/u2102661/CS310/datasets/initial_set/Bury_v_North_Walsham_Yellow_Card_HIgh_Tackle1.mp4")
+
+    return
+
     train_loader = DataLoader(train_data, batch_size=16, shuffle=True)
     test_loader = DataLoader(test_data, batch_size=16, shuffle=True)
     validate_loader = DataLoader(validate_data, batch_size=16, shuffle=True)
