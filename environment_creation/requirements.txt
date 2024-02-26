@@ -6,3 +6,4 @@ moviepy
 torch
 av
 ultralytics
+scikit-learn
