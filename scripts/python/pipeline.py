@@ -11,6 +11,63 @@ from action_recogniser_model import ActionRecogniserModel, action_prediction
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+# Computes the normalised distance between player1's estimated head location and player2's keypoints
+def compute_player_distances(player1, player2):
+    player2_distances = []
+    player1_head_x, player1_head_y = 0
+    player1_divisor = 0
+    # The first 5 key points are: nose, left eye, right eye, left ear and right ear which we will use to estimate the head location
+    for i in range(5):
+        if player1[i][0] != 0:
+            player1_head_x += player1[i][0]
+            player1_head_y += player1[i][1]
+            player1_divisor += 1
+    # Computing the average head location of the points that were found
+    if player1_divisor != 0:
+        player1_head_x /= player1_divisor
+        player1_head_y /= player1_divisor
+    else:
+        # If no head keypoints are found, we will estimate the head location from the other existing key points
+        # Its x coordinate will be the average of the left and right shoulder
+        if player1[5][0] != 0 and player1[6][0] != 0:
+            player1_head_x = player1[5][0] + player1[6][0] / 2
+        elif player1[5][0] == 0 and player1[6][0] != 0:
+            player1_head_x = player1[6][0]
+        elif player1[5][0] != 0 and player1[6][0] == 0:
+            player1_head_x = player1[5][0]
+        # The hip keypoints must exist if the player is considered to be in the tackle
+        else: 
+            player1_head_x = player1[11][0] + player1[12][0] / 2
+
+        # Its y coordinate will be the distance between the ankle and shoulder multiplied by 1.08
+        # We are checking the left ankle and left shoulder first
+        if player1[5][1] != 0 and player1[15][1] != 0:
+            player1_head_y = player1[5][1] - player1[15][1] * 1.08
+        elif player1[6][1] != 0 and player1[16][1] != 0:
+            player1_head_y = player1[6][1] - player1[16][1] * 1.08
+        # If these points arent available we will use the left hip and left shoulder multiplied by 2.75
+        elif player1[11][1] != 0 and player1[5][1] != 0:
+            player1_head_y = player1[5][1] - player1[11][1] * 2.75
+        elif player1[12][1] != 0 and player1[6][1] != 0:
+            player1_head_y = player1[6][1] - player1[12][1] * 2.75
+    
+    if (player1_head_x == 0 and player1_head_y == 0):
+        print("Not enough keypoints were found to add this to the dataset")
+        return []
+    # We want to work out the distance between each players keypoints and the average head location of the other player
+    for i in range(17):
+        if player2[i][0] != 0 and player2[i][1] != 0:
+            player2_distances.append([abs(player2[i][0] - player1_head_x), abs(player2[i][1] - player1_head_y)])
+        elif player2[i][0] != 0: 
+            player2_distances.append([abs(player2[i][0] - player1_head_x), 0])
+        elif player2[i][1] != 0:
+            player2_distances.append([0, abs(player2[i][1] - player1_head_y)])
+        else:
+            player2_distances.append([0, 0])
+    player2_distances = np.array(player2_distances)
+    return player2_distances
+
+
 def pipeline(video_path):
     # Load the video
     cap = cv2.VideoCapture(video_path)
