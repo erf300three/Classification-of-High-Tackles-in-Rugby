@@ -16,9 +16,41 @@ def transform_csv_to_object(in_path):
             data[row["video_name"]].append((int(row["start_frame"]), int(row["end_frame"])))
     return data
 
+def create_tackle_videos(in_path, out_dir, data):
+    for video in os.listdir(in_path):
+        print(f"===================={video}====================")
+        if not(video.endswith(".mp4")):
+            continue
+        video_path = os.path.join(in_path, video)
+        cap = cv2.VideoCapture(video_path)
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        list_of_tackles = data[video]
+        if not os.path.exists(os.path.join(out_dir, "tackles")):
+            os.makedirs(os.path.join(out_dir, "tackles"))
+        for idx, (tackle_start, tackle_end) in enumerate(list_of_tackles):
+            outpath = os.path.join(out_dir, "tackles", video[:-4] + "_" + str(idx) + ".mp4")
+            print(outpath)
+            writer = cv2.VideoWriter(outpath, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
+            cap.set(cv2.CAP_PROP_POS_FRAMES, tackle_start)
+            ret = True
+            while cap.isOpened() and ret and writer.isOpened():
+                ret, frame = cap.read()
+                frame_number = cap.get(cv2.CAP_PROP_POS_FRAMES)
+                if frame_number <= tackle_end:
+                    writer.write(frame)
+                if frame_number > tackle_end:
+                    break
+            writer.release()
+        cap.release()
+        cv2.destroyAllWindows() 
+
 # We label a clip as a tackle if at least 50% of the frames in the clip contain a tackle
 def create_videos(in_path, out_dir, data):
+    # Define the length of the clips and the require number of frames to overlap the tackle frames
     clip_length = 16
+    frame_overlap = 8
     for video in os.listdir(in_path):
         print(video)
         if not(video.endswith(".mp4")):
@@ -42,7 +74,8 @@ def create_videos(in_path, out_dir, data):
             is_tackle = 0
             for (tackle_start, tackle_end) in list_of_tackles:
                 overlap = range(max(clip_start, tackle_start), min(clip_end, tackle_end))
-                if len(overlap) >= clip_length/2:
+                # We require the overlap to be greater than or equal to the frame_overlap to label the clip as a tackle
+                if len(overlap) >= frame_overlap:
                     print((clip_start, clip_end))
                     print(len(overlap))
                     is_tackle = 1
@@ -101,9 +134,9 @@ def get_number_of_tackle_clips(in_path):
 # Test:      72                        1143                          1215
 # Validation 56                        1167                          1223
 def main(): 
-    # in_path = "/dcs/large/u2102661/CS310/datasets/activity_recogniser/original_clips"
-    out_dir = "/dcs/large/u2102661/CS310/datasets/activity_recogniser/"
-    # video_tackle_data = transform_csv_to_object(in_path)
+    in_path = "/dcs/large/u2102661/CS310/datasets/activity_recogniser/original_clips"
+    out_dir = "/dcs/large/u2102661/CS310/datasets/activity_recogniser/tackle_clips"
+    video_tackle_data = transform_csv_to_object(in_path)
 
     # with open(os.path.join(out_dir, "train", "labels.csv"), 'w', newline='') as csvfile:
     #     writer = csv.writer(csvfile)
@@ -117,7 +150,8 @@ def main():
 
     # create_videos(in_path, out_dir, video_tackle_data)
 
-    print(get_number_of_tackle_clips(out_dir))
+    # print(get_number_of_tackle_clips(out_dir))
+    create_tackle_videos(in_path, out_dir, video_tackle_data)
 
 if __name__ == "__main__":
     main()
