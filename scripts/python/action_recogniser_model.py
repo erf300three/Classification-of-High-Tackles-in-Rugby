@@ -83,6 +83,8 @@ class ActionRecogniserModel(nn.Module):
             self.parent_model = nn.Sequential(*list(models.video.r3d_18(pretrained=True).children())[:-1], nn.Flatten(1), list(models.video.r3d_18(pretrained=True).children())[-1])
         elif parent_model_name == "r3d_18":
             self.parent_model = nn.Sequential(*list(models.video.r3d_18(pretrained=True).children())[:-1], nn.Flatten(1), list(models.video.r3d_18(pretrained=True).children())[-1])
+        elif parent_model_name == "r2plus1d_18":
+            self.parent_model = nn.Sequential(*list(models.video.r2plus1d_18(pretrained=True).children())[:-1], nn.Flatten(1), list(models.video.r2plus1d_18(pretrained=True).children())[-1])
         else:
             self.parent_model = nn.Sequential(*list(parent_model.children()))
         self.batchNorm1 = nn.BatchNorm1d(400)
@@ -134,8 +136,8 @@ train_data = ActionRecogniserDataset(
     transform=transform_main
 )
 test_data = ActionRecogniserDataset(
-    annotation_file="/dcs/large/u2102661/CS310/datasets/activity_recogniser/test/labels.csv",
-    video_dir="/dcs/large/u2102661/CS310/datasets/activity_recogniser/test",
+    annotation_file="/dcs/large/u2102661/CS310/datasets/activity_recogniser/temp/labels.csv",
+    video_dir="/dcs/large/u2102661/CS310/datasets/activity_recogniser/temp",
     is_test=True, 
     transform=transform1
 )
@@ -153,21 +155,19 @@ validate_data = ActionRecogniserDataset(
 # Class 1: Tackle
 
 # # Location    Number of tackle clips    Number of non-tackle clips    Total number of clips
-# # All dirs:   570                       11337                         11907
-# # Train:      442                       9027                          9469
-# # Test:       72                        1143                          1215
-# # Validation: 56                        1167                          1223
+# # All dirs:   947                       19786                         20733
+# # Train:      750                       15721                         16471
+# # Test:       110                       2077                          2187
+# # Validation: 87                        1988                          2075
 
 # weight_class_i = #total_clips / (#classes * #clips_in_class_i)
 
-# All dirs:   11907 / (2 * 570) = 10.44 , 11907 / (2 * 11337) = 0.525
-# Train:      9469 / (2 * 442) = 10.71 , 9469 / (2 * 9027) = 0.524
-# Test:       1215 / (2 * 72) = 8.44   , 1215 / (2 * 1143) = 0.531
-# Validation: 1223 / (2 * 56) = 10.92 , 1223 / (2 * 1167) = 0.524
+# All dirs:   20733 / (2 * 947) = 10.95 , 20733 / (2 * 19786) = 0.5239   
+# Train:      16471 / (2 * 750) = 10.98 , 16471 / (2 * 15721) = 0.5239
+# Test:       2187 / (2 * 110) = 9.94   , 2187 / (2 * 2077) = 0.5265
+# Validation: 2075 / (2 * 87) = 11.93 , 2075 / (2 * 1988) = 0.5219
 
-# We are going to use the class weights for the training data 
-class_weights = [0.524, 10.71]
-class_weights = [0.262, 21.42]
+# We are going to use the class weights for the training data s
 
 # We are going to follow the same intuition that pytorch uses for the BCELoss function
 # Since log(0) = -inf as lim x->0 log(x) = -inf and then we could be multiplying by 0 we can be 
@@ -176,20 +176,12 @@ class_weights = [0.262, 21.42]
 # 
 # To avoid this problem we are going to do what clamp the log value to be greater than -100 
 def loss_function(output, target):
-    # print("output: ", output)
-    # print("target: ", target)
-
     temp1 = torch.clamp(torch.log(output), min=-100)
     temp2 = torch.clamp(torch.log(1 - output), min=-100)
-
-    all_loss = -(10.71 * (target * temp1) + 0.524 * ((1 - target) * temp2))
-    # print("(clamped) log(output) : ", temp1)
-    # print("(clamped) log(1 - output): ", temp2)
-    # print("target * torch.log(output): ", target * temp1)
-    # print("(1 - target) * torch.log(1 - output): ", (1 - target) * temp2)
-    # print("all_loss", all_loss)
+    class_0_weight = 0.5239
+    class_1_weight = 10.98
+    all_loss = -(class_1_weight * (target * temp1) + class_0_weight * ((1 - target) * temp2))   
     loss = torch.mean(all_loss)
-    # print("loss: ", loss)
     return loss
 
 def train(model, train_loader, loss_fun, optimizer, batch_size=4):
@@ -437,7 +429,7 @@ def full_video_clips_evaluate(model, dir_to_test):
 
 # This is the function that will be used in the pipeline to predict the frames of a video that is likely to contain a tackle
 # We are again using a sliding window of 16 frames which will be split between 8 frames before and 7 frames after the current frame
-def action_prediction(model, video_path):
+def action_prediction(model, video_path, is_full_version=True):
     print("Predicting frames likely to contain a tackle...")
 
     # We are going to need to read the video in chunks of 16 frames as a tensor
@@ -448,59 +440,60 @@ def action_prediction(model, video_path):
     # Our main loop which centres the sliding window
     clips = []
     outputs = []
+    # As we write the results of the prediction to a csv file we have the option to read directy from that for another prediction on the same video
+    if is_full_version:
+        for i in range(8, int(reader.get_metadata()["video"]["fps"][0] * reader.get_metadata()["video"]["duration"][0]) - 8):
+            clip = None
+            print("i: ", i)
+            print("start_pts: ", (i-8) * float(1 / reader.get_metadata()["video"]["fps"][0]))
+            print("end_pts: ", (i+7) * float(1 / reader.get_metadata()["video"]["fps"][0]))
+            
+            clip = read_video(video_path, pts_unit='sec', start_pts=(i-8) * float(1 / reader.get_metadata()["video"]["fps"][0]), end_pts=(i+7) * float(1 / reader.get_metadata()["video"]["fps"][0]))
+            print("clip shape: ", clip[0].shape)
+            # If the length of the clip is greater than 16 then we need to drop the first frames
+            if clip[0].shape[0] > 16:
+                clip = clip[0][-16:, :, :, :]
+            else: 
+                clip = clip[0]
+            clip = clip.permute(0, 3, 1, 2)
+            clip = clip.to(dtype=torch.float32)
+            clip = clip.to(device)
+            # We are going to need to transform the clip to be in the correct format for the model
+            clip = transform1(clip)
+            clip = Resize((224, 224))(clip)
+            clip = clip.permute(1, 0, 2, 3)
+            print("clip shape augmented: ", clip.shape)
 
-    for i in range(8, int(reader.get_metadata()["video"]["fps"][0] * reader.get_metadata()["video"]["duration"][0]) - 8):
-        clip = None
-        print("i: ", i)
-        print("start_pts: ", (i-8) * float(1 / reader.get_metadata()["video"]["fps"][0]))
-        print("end_pts: ", (i+7) * float(1 / reader.get_metadata()["video"]["fps"][0]))
-        
-        clip = read_video(video_path, pts_unit='sec', start_pts=(i-8) * float(1 / reader.get_metadata()["video"]["fps"][0]), end_pts=(i+7) * float(1 / reader.get_metadata()["video"]["fps"][0]))
-        print("clip shape: ", clip[0].shape)
-        # If the length of the clip is greater than 16 then we need to drop the first frames
-        if clip[0].shape[0] > 16:
-            clip = clip[0][-16:, :, :, :]
-        else: 
-            clip = clip[0]
-        clip = clip.permute(0, 3, 1, 2)
-        clip = clip.to(dtype=torch.float32)
-        clip = clip.to(device)
-        # We are going to need to transform the clip to be in the correct format for the model
-        clip = transform1(clip)
-        clip = Resize((224, 224))(clip)
-        clip = clip.permute(1, 0, 2, 3)
-        print("clip shape augmented: ", clip.shape)
-
-        clips.append(clip)
-        print("stop condition: ", i % 16)
-        if i % 16 == 7 or i == int(reader.get_metadata()["video"]["fps"][0] * reader.get_metadata()["video"]["duration"][0]) - 9:
-            # If there is less than 4 frames remain at the end then we just skip them and make no predictions on those frames 
-            if len(clips) < 4: 
+            clips.append(clip)
+            print("stop condition: ", i % 16)
+            if i % 16 == 7 or i == int(reader.get_metadata()["video"]["fps"][0] * reader.get_metadata()["video"]["duration"][0]) - 9:
+                # If there is less than 4 frames remain at the end then we just skip them and make no predictions on those frames 
+                if len(clips) < 4: 
+                    clips = []
+                    continue
+                temp = torch.stack(clips, dim=0)
+                # Delete all the entries in clip to free up memory
+                for clip in clips:
+                    del clip
+                clips = temp
+                print(clips.shape)
+                with torch.no_grad():
+                    output = model(clips)
+                    print(output)
                 clips = []
-                continue
-            temp = torch.stack(clips, dim=0)
-            # Delete all the entries in clip to free up memory
-            for clip in clips:
-                del clip
-            clips = temp
-            print(clips.shape)
-            with torch.no_grad():
-                output = model(clips)
-                print(output)
-            clips = []
-             
-            for j in range(len(output)):
-                outputs.append(output[j].item())
-    
-    print("Done predicting frames likely to contain a tackle")
+                
+                for j in range(len(output)):
+                    outputs.append(output[j].item())
+        
+        print("Done predicting frames likely to contain a tackle")
 
-    # Now we need to write the outputs to a csv file 
-    with open(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/action_recogniser/{video_path.split('/')[-1][:-4]}.csv", 'w', newline='') as csvfile:
-        csv_file = csv.DictWriter(csvfile, fieldnames=["frame_number", "output"])
-        csv_file.writeheader()
-        for i in range(len(outputs)):
-            csv_file.writerow({"frame_number": i + 8, "output": outputs[i]})
-    
+        # Now we need to write the outputs to a csv file 
+        with open(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/action_recogniser/{video_path.split('/')[-1][:-4]}.csv", 'w', newline='') as csvfile:
+            csv_file = csv.DictWriter(csvfile, fieldnames=["frame_number", "output"])
+            csv_file.writeheader()
+            for i in range(len(outputs)):
+                csv_file.writerow({"frame_number": i + 8, "output": outputs[i]})
+        
 
     # We now want to return frames where there are 4 predictions within 16 frames that all are above 0.85
     with open(f"/dcs/large/u2102661/CS310/model_evaluation/pipeline/action_recogniser/{video_path.split('/')[-1][:-4]}.csv", 'r', newline='') as csvfile:
@@ -587,12 +580,6 @@ def save_model(model, path):
 
 def main(is_test=False, parent_model_name="r3d_18"):
     # Create the data loaders
-
-    my_model = torch.load("/dcs/large/u2102661/CS310/models/activity_recogniser/r3d_18/run4/best.pt", map_location=device).to(device)
-    action_prediction(my_model, "/dcs/large/u2102661/CS310/datasets/initial_set/Bury_v_North_Walsham_Yellow_Card_HIgh_Tackle1.mp4")
-
-    return
-
     train_loader = DataLoader(train_data, batch_size=16, shuffle=True)
     test_loader = DataLoader(test_data, batch_size=16, shuffle=True)
     validate_loader = DataLoader(validate_data, batch_size=16, shuffle=True)
@@ -600,16 +587,22 @@ def main(is_test=False, parent_model_name="r3d_18"):
     if is_test:
         # torch.cuda.empty_cache()
         if parent_model_name == "r3d_18":
-            my_model = torch.load("/dcs/large/u2102661/CS310/models/activity_recogniser/r3d_18/run4/best.pt")
+            my_model = torch.load("/dcs/large/u2102661/CS310/models/activity_recogniser/r3d_18/run4/best.pt", map_location=device)
+        elif parent_model_name == "r2plus1d_18":
+            my_model = torch.load("/dcs/large/u2102661/CS310/models/activity_recogniser/r2plus1d_18/run1_old_data/best.pt", map_location=device)
         my_model = my_model.to(device)
-        # evaluate(my_model, test_loader, batch_stize=16)
-        print("model loaded")
-        # full_video_clips_evaluate(my_model, "/dcs/large/u2102661/CS310/datasets/activity_recogniser/full_length_clips/")
+        evaluate(my_model, test_loader, batch_stize=16)
+        full_video_clips_evaluate(my_model, "/dcs/large/u2102661/CS310/datasets/activity_recogniser/full_length_clips/")
         write_new_films_with_predictions("/dcs/large/u2102661/CS310/model_evaluation/action_recogniser/full_video_clips.csv", "/dcs/large/u2102661/CS310/datasets/activity_recogniser/full_length_clips")
     else:
         # Create the model
-        model = models.video.r3d_18(pretrained=True)
-        my_model = ActionRecogniserModel(model, "r3d_18").to(device)
+        if parent_model_name == "r3d_18":
+            model = models.video.r3d_18(pretrained=True)
+            my_model = ActionRecogniserModel(model, "r3d_18").to(device)
+        elif parent_model_name == "r2plus1d_18":
+            model = models.video.r2plus1d_18(pretrained=True)
+            my_model = ActionRecogniserModel(model, "r2plus1d_18").to(device)
+
         # Freeze the weights of the parent model
         my_model.parent_model.requires_grad_(False)
         best_f1 = -1
@@ -620,9 +613,8 @@ def main(is_test=False, parent_model_name="r3d_18"):
         params = list(my_model.parameters())
         print(params[-2])
         print(params[-1])
-
-        optimizer = torch.optim.Adam(my_model.parameters(), lr = 0.001)
-
+        # Add in L2 regularisation through the Adam optimiser which is the preferred method for pytorch
+        optimizer = torch.optim.Adam(my_model.parameters(), lr = 0.001, weight_decay=0.0001)
         # This is the training loop
         with open("/dcs/large/u2102661/CS310/models/activity_recogniser/loss.csv", 'w', newline='') as csvfile:
             csv_file = csv.DictWriter(csvfile, fieldnames=["epoch", "loss", "f1", "f2"])
@@ -641,7 +633,7 @@ def main(is_test=False, parent_model_name="r3d_18"):
                     number_since_best += 1
                 save_model(my_model, "/dcs/large/u2102661/CS310/models/activity_recogniser/last.pt")
                 csv_file.writerow({"epoch": epoch, "loss": average_loss, "f1": epoch_f1, "f2": epoch_f2})
-                if number_since_best > 50:
+                if number_since_best > 30:
                     print("Stopping early as no improvement in 50 epochs")
                     print(f"Best f1: {best_f1} at epoch {best_epoch}")
                     break
@@ -654,4 +646,4 @@ def main(is_test=False, parent_model_name="r3d_18"):
 
 
 if __name__ == "__main__":
-    main(is_test=True)
+    main(is_test=False, parent_model_name="r3d_18")
