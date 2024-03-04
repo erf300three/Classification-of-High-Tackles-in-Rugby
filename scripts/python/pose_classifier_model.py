@@ -78,7 +78,6 @@ class PoseClassifierModel(nn.Module):
         x = self.relu(x)
         x = self.dropout(x)
         x = self.fc4(x)
-        print(x)
         x = self.softmax(x)
         return x
 
