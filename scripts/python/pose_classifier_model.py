@@ -52,15 +52,15 @@ class PoseDataset(Dataset):
 class PoseClassifierModel(nn.Module):
     def __init__(self, number_of_key_points):
         super(PoseClassifierModel, self).__init__()
-        # self.fc1 = nn.Linear(number_of_key_points * 4, 128)
-        self.fc1 = nn.Linear(68, 128)
+        self.fc1 = nn.Linear(number_of_key_points * 4, 128)
+        # self.fc1 = nn.Linear(68, 128)
         # self.batch_norm1 = nn.BatchNorm1d(128)
         self.fc2 = nn.Linear(128, 64)
         # self.batch_norm2 = nn.BatchNorm1d(64)
         self.fc3 = nn.Linear(64, 32)
         # self.batch_norm3 = nn.BatchNorm1d(32)
         self.fc4 = nn.Linear(32, 3)
-        self.softmax = nn.Softmax(dim=1)
+        self.softmax = nn.Softmax()
         self.dropout = nn.Dropout(0.2)
         self.relu = nn.ReLU()
 
@@ -78,6 +78,7 @@ class PoseClassifierModel(nn.Module):
         x = self.relu(x)
         x = self.dropout(x)
         x = self.fc4(x)
+        print(x)
         x = self.softmax(x)
         return x
 
@@ -157,6 +158,40 @@ def get_number_per_class(dir_path):
             elif row["tackle_type"] == "2":
                 number_of_high_tackles[2] += 1
     return number_of_no_tackles, number_of_low_tackles, number_of_high_tackles
+
+# This is the function that we will use in the pipeline to classify the poses as no tackle, low tackle or high tackle
+def tackle_classification(model, player1_distances, player2_distances, device):
+    model.eval()
+    print("Player 1 distances", player1_distances)
+    print("Player 2 distances", player2_distances)
+    player1_distances = torch.tensor(player1_distances)
+    player2_distances = torch.tensor(player2_distances)
+    player1_distances = torch.flatten(player1_distances)
+    player2_distances = torch.flatten(player2_distances)
+    print("Player 1 distances", player1_distances)
+    print("Player 2 distances", player2_distances)
+    input_tensor = torch.cat((player1_distances, player2_distances))
+    # Create the input tensor
+    print(input_tensor.shape)
+    print("input tensor", input_tensor)
+
+    # Change the shape to be 1 x 68
+    input_tensor = torch.reshape(input_tensor, (1, -1))
+    print("Reshaped input tensor", input_tensor)
+    print("Input tensor shape", input_tensor.shape)
+
+    # Flatten the tensor
+    input_tensor = input_tensor.to(device)
+    input_tensor = input_tensor.to(dtype=torch.float32)
+    print("Input tensor", input_tensor)
+    # Get the prediction
+    pred = None
+    with torch.no_grad():
+        pred = model(input_tensor)
+        print("Prediction", pred)
+        pred = torch.argmax(pred)
+        print("Argmax", pred)
+    return pred
 
 
 def train(model, train_loader, loss_function, optimiser, batch_size= 4):
