@@ -5,20 +5,28 @@ import argparse
 def convert_avi_to_mp4(input_dir, output_dir):
     for file in os.listdir(input_dir):
         if file.endswith(".avi"):
-            clip = moviepy.VideoFileClip(input_dir + '/' + file)
+            clip = moviepy.VideoFileClip(os.path.join(input_dir, file))
             clip.write_videofile(output_dir + '/' + file[:-4] + ".mp4")
             # Delete old .avi version of the file   
-            os.remove(input_dir + '/' + file)
+            os.remove(os.path.join(input_dir, file))
 
 # convert_avi_to_mp4("data/output_set/tracked", "data/output_set/tracked")
 
 def convert_mov_to_mp4(input_dir, output_dir):
     filenames = [filename for filename in os.listdir(input_dir) if filename.endswith(".mov")]
     for filename in filenames:
-        clip = moviepy.VideoFileClip(input_dir + '/' + filename)
+        clip = moviepy.VideoFileClip(os.path.join(input_dir, filename))
         clip.write_videofile(output_dir + '/' + filename[:-4] + ".mp4")
         # Delete old .mov version of the file   
-        os.remove(input_dir + '/' + filename)
+        os.remove(os.path.join(input_dir, filename))
+
+def convert_mp4_to_h264(input_dir, output_dir):
+    filenames = [filename for filename in os.listdir(input_dir) if filename.endswith(".mp4")]
+    for filename in filenames:
+        clip = moviepy.VideoFileClip(os.path.join(input_dir, filename))
+        clip.write_videofile(output_dir + '/' + filename[:-4] + ".mp4")
+        # Delete old .mp4 version of the file   
+        os.remove(os.path.join(input_dir, filename))
 
 def main():
     """
@@ -36,6 +44,8 @@ def main():
             convert_avi_to_mp4(args.dir, args.out_dir)
         case "mov":
             convert_mov_to_mp4(args.dir, args.out_dir)
+        case "mp4":
+            convert_mp4_to_h264(args.dir, args.out_dir)
 
 if __name__ == "__main__":
     main()
