@@ -14,12 +14,47 @@ from pose_classifier_model import PoseClassifierModel, tackle_classification
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# Computes the normalised distance between player1's estimated head location and player2's keypoints
+# Computes the normalised distance between player1's estimated head location and player2's keypoints this then computes player2's distances
 def compute_player_distances(player1, player2):
     player2_distances = []
     player1_head_x = 0
     player1_head_y = 0
     player1_divisor = 0
+
+    # We want to determine if the player is standing up or lying down as this will affect the head location 
+    player1_tallest_keypoint = 0
+    player1_shortest_keypoint = 0
+    # Find the first index that is not 0
+    for i in range(17):
+        if player1[i][1] != 0:
+            player1_tallest_keypoint = i
+            break
+    # Find the last index that is not 0
+    for i in range(16, -1, -1):
+        if player1[i][1] != 0:
+            player1_shortest_keypoint = i
+            break
+
+    player_facing = ""
+    player1_standing = True
+    # The height of the player is the distance between the highest and lowest keypoints
+    player1_height_y = abs(player1[player1_tallest_keypoint][1] - player1[player1_shortest_keypoint][1])
+    player1_height_x = abs(player1[player1_tallest_keypoint][0] - player1[player1_shortest_keypoint][0])
+
+    # Determine if the player is standing up or lying down
+    if player1_height_y > player1_height_x:
+        player1_standing = True
+        if player1[player1_tallest_keypoint][1] < player1[player1_shortest_keypoint][1]:
+            player_facing = "up"
+        else:
+            player_facing = "down"
+    else:
+        player1_standing = False
+        if player1[player1_tallest_keypoint][0] < player1[player1_shortest_keypoint][0]:
+            player_facing = "left"
+        else:
+            player_facing = "right"
+
     # The first 5 key points are: nose, left eye, right eye, left ear and right ear which we will use to estimate the head location
     for i in range(5):
         if player1[i][0] != 0:
@@ -31,33 +66,114 @@ def compute_player_distances(player1, player2):
         player1_head_x /= player1_divisor
         player1_head_y /= player1_divisor
     else:
-        # If no head keypoints are found, we will estimate the head location from the other existing key points
-        # Its x coordinate will be the average of the left and right shoulder
-        if player1[5][0] != 0 and player1[6][0] != 0:
-            player1_head_x = player1[5][0] + player1[6][0] / 2
-        elif player1[5][0] == 0 and player1[6][0] != 0:
-            player1_head_x = player1[6][0]
-        elif player1[5][0] != 0 and player1[6][0] == 0:
-            player1_head_x = player1[5][0]
-        # The hip keypoints must exist if the player is considered to be in the tackle
-        else: 
-            player1_head_x = player1[11][0] + player1[12][0] / 2
+        # Use whether the player is standing up or lying down to determine the head location
+        distance = 0
+        key_point = 0
+        if player1_standing:
+            # The x coordinate will be the average of the left and right shoulder
+            if player1[5][0] != 0 and player1[6][0] != 0:
+                player1_head_x = (player1[5][0] + player1[6][0]) / 2
+            elif player1[5][0] == 0 and player1[6][0] != 0:
+                player1_head_x = player1[6][0]
+            elif player1[5][0] != 0 and player1[6][0] == 0:
+                player1_head_x = player1[5][0]
+            # The hip keypoints must exist if the player is considered to be in the tackle
+            else:
+                if player1[11][0] != 0 and player1[12][0] != 0:
+                    player1_head_x = (player1[11][0] + player1[12][0]) / 2
+                elif player1[11][0] == 0 and player1[12][0] != 0:
+                    player1_head_x = player1[12][0]
+                elif player1[11][0] != 0 and player1[12][0] == 0:
+                    player1_head_x = player1[11][0]
+                else:
+                    print("Not enough keypoints to determine head location")
+                    return 0, 0, []
 
-        # Its y coordinate will be the distance between the ankle and shoulder multiplied by 1.08
-        # We are checking the left ankle and left shoulder first
-        if player1[5][1] != 0 and player1[15][1] != 0:
-            player1_head_y = player1[5][1] - player1[15][1] * 1.08
-        elif player1[6][1] != 0 and player1[16][1] != 0:
-            player1_head_y = player1[6][1] - player1[16][1] * 1.08
-        # If these points arent available we will use the left hip and left shoulder multiplied by 2.75
-        elif player1[11][1] != 0 and player1[5][1] != 0:
-            player1_head_y = player1[5][1] - player1[11][1] * 2.75
-        elif player1[12][1] != 0 and player1[6][1] != 0:
-            player1_head_y = player1[6][1] - player1[12][1] * 2.75
-    
-    if (player1_head_x == 0 and player1_head_y == 0):
+            print("Player 1 Head X: ", player1_head_x)
+
+            # The y coordinate will be the distance between the ankle and the shoulder multiplied by 1.15 if they exist
+
+            if player1[5][1] != 0 and player1[15][1] != 0:
+                distance = abs(player1[5][1] - player1[15][1]) * 1.15
+                key_point = player1[15][1]
+            elif player1[6][1] != 0 and player1[16][1] != 0:
+                distance = abs(player1[6][1] - player1[16][1]) * 1.15
+                key_point = player1[16][1]
+            # If these points arent available we will use the hips and shoulders multiplied by 1.4
+            elif player1[11][1] != 0 and player1[5][1] != 0:
+                distance = abs(player1[11][1] - player1[5][1]) * 1.4
+                key_point = player1[11][1]
+            elif player1[12][1] != 0 and player1[6][1] != 0:
+                distance = abs(player1[12][1] - player1[6][1]) * 1.4
+                key_point = player1[12][1]
+            # If these points arent available we will use the knees and hips multiplied by 2.58
+            elif player1[13][1] != 0 and player1[11][1] != 0:
+                distance = abs(player1[13][1] - player1[11][1]) * 2.58
+                key_point = player1[13][1]
+            elif player1[14][1] != 0 and player1[12][1] != 0:
+                distance = abs(player1[14][1] - player1[12][1]) * 2.58
+                key_point = player1[14][1]
+            else:
+                print("Not enough keypoints to determine head location")
+                return 0, 0, []
+            
+            if player_facing == "up":
+                player1_head_y = key_point - distance
+            elif player_facing == "down":
+                player1_head_y = key_point + distance
+        else:
+            # The y coordinate will be the average of the left and right shoulder
+            if player1[5][1] != 0 and player1[6][1] != 0:
+                player1_head_y = (player1[5][1] + player1[6][1]) / 2
+            elif player1[5][1] == 0 and player1[6][1] != 0:
+                player1_head_y = player1[6][1]
+            elif player1[5][1] != 0 and player1[6][1] == 0:
+                player1_head_y = player1[5][1]
+            # The hip keypoints must exist if the player is considered to be in the tackle
+            else:
+                if player1[11][1] != 0 and player1[12][1] != 0:
+                    player1_head_y = (player1[11][1] + player1[12][1]) / 2
+                elif player1[11][1] == 0 and player1[12][1] != 0:
+                    player1_head_y = player1[12][1]
+                elif player1[11][1] != 0 and player1[12][1] == 0:
+                    player1_head_y = player1[11][1]
+                else:
+                    print("Not enough keypoints to determine head location")
+                    return 0, 0, []
+            
+            # The x coordinate will be the distance between the ankle and shoulder multiplied by 1.15 if they exist
+            if player1[5][0] != 0 and player1[15][0] != 0:
+                distance = abs(player1[5][0] - player1[15][0]) * 1.15
+                key_point = player1[15][0]
+            elif player1[6][0] != 0 and player1[16][0] != 0:
+                distance = abs(player1[6][0] - player1[16][0]) * 1.15
+                key_point = player1[16][0]
+            # If these points arent available we will use the hips and shoulders multiplied by 1.4
+            elif player1[11][0] != 0 and player1[5][0] != 0:
+                distance = abs(player1[11][0] - player1[5][0]) * 1.4
+                key_point = player1[11][0]
+            elif player1[12][0] != 0 and player1[6][0] != 0:
+                distance = abs(player1[12][0] - player1[6][0]) * 1.4
+                key_point = player1[12][0]
+            # If these points arent available we will use the knees and hips multiplied by 2.58
+            elif player1[13][0] != 0 and player1[11][0] != 0:
+                distance = abs(player1[13][0] - player1[11][0]) * 2.58
+                key_point = player1[13][0]
+            elif player1[14][0] != 0 and player1[12][0] != 0:
+                distance = abs(player1[14][0] - player1[12][0]) * 2.58
+                key_point = player1[14][0]
+            else:
+                print("Not enough keypoints to determine head location")
+                return 0, 0, []
+        
+            if player_facing == "left":
+                player1_head_x = key_point - distance
+            elif player_facing == "right":
+                player1_head_x = key_point + distance
+                  
+    if (player1_head_x == 0 or player1_head_y == 0):
         print("Not enough keypoints were found to add this to the dataset")
-        return []
+        return 0, 0, []
     # We want to work out the distance between each players keypoints and the average head location of the other player
     for i in range(17):
         if player2[i][0] != 0 and player2[i][1] != 0:
@@ -69,7 +185,7 @@ def compute_player_distances(player1, player2):
         else:
             player2_distances.append([0, 0])
     player2_distances = np.array(player2_distances)
-    return player2_distances
+    return player1_head_x, player1_head_y, player2_distances
 
 
 def pipeline(video_path):
