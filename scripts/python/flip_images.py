@@ -1,20 +1,32 @@
-from PIL import Image
 import os
 import argparse
+from PIL import Image
 
 
-def flip_images(dir):
-    for file in os.listdir(dir):
+def flip_images(in_dir):
+    """
+    This function flips all images in a directory horizontally
+
+    Input:
+        in_dir: string, path to the directory containing images to flip
+
+    Output:
+        All images in the directory are flipped horizontally and saved with the same name with "_flipped" appended
+    """
+    for file in os.listdir(in_dir):
         if file.endswith(".jpg"):
-            img = Image.open(dir + '/' + file)
+            img = Image.open(in_dir + '/' + file)
             img = img.transpose(Image.FLIP_LEFT_RIGHT)
-            img.save(dir + '/' + file[:-4] + "_flipped.jpg")
+            img.save(in_dir + '/' + file[:-4] + "_flipped.jpg")
 
 
 def main():
     """
-    Main function
-    :return: true if video conversion is successful 
+    This script flips all images in a directory horizontally using the PIL library and saves them with the same name
+    with "_flipped" appended
+
+    Arguments:
+        --dir: string, path to the directory containing images to flip
     """
 
     parser = argparse.ArgumentParser(description='Flip images')
