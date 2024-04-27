@@ -33,7 +33,8 @@ def create_tackle_videos(in_path, out_dir, data):
             outpath = os.path.join(out_dir, "tackles", video[:-4] + "_" + str(idx) + ".mp4")
             print(outpath)
             writer = cv2.VideoWriter(outpath, cv2.VideoWriter_fourcc(*'mp4v'), fps, (width, height))
-            cap.set(cv2.CAP_PROP_POS_FRAMES, tackle_start)
+            cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, tackle_start - (fps * 3)))
+            tackle_end = min(tackle_end + (fps * 2), cap.get(cv2.CAP_PROP_FRAME_COUNT))
             ret = True
             while cap.isOpened() and ret and writer.isOpened():
                 ret, frame = cap.read()
@@ -49,8 +50,8 @@ def create_tackle_videos(in_path, out_dir, data):
 # We label a clip as a tackle if at least 50% of the frames in the clip contain a tackle
 def create_videos(in_path, out_dir, data):
     # Define the length of the clips and the require number of frames to overlap the tackle frames
-    clip_length = 16
-    frame_overlap = 8
+    clip_length = 5
+    frame_overlap = 3
     for video in os.listdir(in_path):
         print(video)
         if not(video.endswith(".mp4")):
@@ -118,7 +119,7 @@ def get_number_of_tackle_clips(in_path):
     number_of_tackle_clips = 0 
     total_number_of_clips = 0
 
-    for dir in ["test", "train", "validation"]:
+    for dir in ["validation"]:
         with open(os.path.join(in_path, dir, "labels.csv"), 'r', newline='') as csvfile:
             reader = csv.DictReader(csvfile)
             for row in reader:
@@ -135,8 +136,8 @@ def get_number_of_tackle_clips(in_path):
 # Validation 56                        1167                          1223
 def main(): 
     in_path = "/dcs/large/u2102661/CS310/datasets/activity_recogniser/original_clips"
-    out_dir = "/dcs/large/u2102661/CS310/datasets/activity_recogniser/tackle_clips"
-    video_tackle_data = transform_csv_to_object(in_path)
+    out_dir = "/dcs/large/u2102661/CS310/datasets/activity_recogniser_5_frames"
+    # video_tackle_data = transform_csv_to_object(in_path)
 
     # with open(os.path.join(out_dir, "train", "labels.csv"), 'w', newline='') as csvfile:
     #     writer = csv.writer(csvfile)
@@ -150,8 +151,8 @@ def main():
 
     # create_videos(in_path, out_dir, video_tackle_data)
 
-    # print(get_number_of_tackle_clips(out_dir))
-    create_tackle_videos(in_path, out_dir, video_tackle_data)
+    print(get_number_of_tackle_clips(out_dir))
+    # create_tackle_videos(in_path, out_dir, video_tackle_data)
 
 if __name__ == "__main__":
     main()

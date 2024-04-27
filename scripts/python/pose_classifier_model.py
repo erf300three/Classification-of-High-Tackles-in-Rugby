@@ -36,10 +36,10 @@ class PoseDataset(Dataset):
         pose_keypoints = []
         # Loop through all of the key points and add them to the pose_keypoints list
         for i in range(self.number_of_keypoints):
-            pose_keypoints.append([self.poses.iloc[idx, 2 + i]])
-        
+            pose_keypoints.append([float(self.poses.iloc[idx, 2 + i])])
         pose_keypoints = torch.tensor(pose_keypoints)
-        label = self.poses.iloc[idx, 2 + self.number_of_keypoints]
+        label = float(self.poses.iloc[idx, 2 + self.number_of_keypoints])
+        label = torch.tensor(label, dtype=torch.long)
         if self.transform:
             pose_keypoints = self.transform(pose_keypoints)
         
@@ -53,12 +53,11 @@ class PoseClassifierModel(nn.Module):
     def __init__(self, number_of_key_points):
         super(PoseClassifierModel, self).__init__()
         self.fc1 = nn.Linear(number_of_key_points * 4, 128)
-        # self.fc1 = nn.Linear(68, 128)
-        # self.batch_norm1 = nn.BatchNorm1d(128)
+        self.batch_norm1 = nn.BatchNorm1d(128)
         self.fc2 = nn.Linear(128, 64)
-        # self.batch_norm2 = nn.BatchNorm1d(64)
+        self.batch_norm2 = nn.BatchNorm1d(64)
         self.fc3 = nn.Linear(64, 32)
-        # self.batch_norm3 = nn.BatchNorm1d(32)
+        self.batch_norm3 = nn.BatchNorm1d(32)
         self.fc4 = nn.Linear(32, 3)
         self.softmax = nn.Softmax()
         self.dropout = nn.Dropout(0.2)
@@ -66,15 +65,15 @@ class PoseClassifierModel(nn.Module):
 
     def forward(self, x):
         x = self.fc1(x)
-        # x = self.batch_norm1(x)
+        x = self.batch_norm1(x)
         x = self.relu(x)
         x = self.dropout(x)
         x = self.fc2(x)
-        # x = self.batch_norm2(x)
+        x = self.batch_norm2(x)
         x = self.relu(x)
         x = self.dropout(x)
         x = self.fc3(x)
-        # x = self.batch_norm3(x)
+        x = self.batch_norm3(x)
         x = self.relu(x)
         x = self.dropout(x)
         x = self.fc4(x)
@@ -83,6 +82,10 @@ class PoseClassifierModel(nn.Module):
 
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+# training_transforms = transforms.Compose([
+#     lambda x: nn.functional.dropout(x, p=0.05)
+# ])
 
 train_dataset = PoseDataset(csv_file="/dcs/large/u2102661/CS310/datasets/pose_estimation/train/pose_classification_train.csv", number_of_keypoints=17)
 
@@ -98,28 +101,18 @@ test_dataset = PoseDataset(csv_file="/dcs/large/u2102661/CS310/datasets/pose_est
 # Class 2: High Tackle
 
 # Location    Number of no tackle poses    Number of low tackle poses    Number of high tackle poses      Total number of clips
-# All dirs:   1876                         33                            175                              2084
-# Train:      1488                         27                            142                              1657
-# Test:       201                          5                             15                               221
-# Validation: 187                          1                             18                               206
+# All dirs:   6542                         419                           278                              7239
+# Train:      5234                         335                           222                              5791
+# Test:       654                          42                            28                               724
+# Validation: 654                          42                            28                               724
 
 
 
 # Location    Class 0 weight    Class 1 weight    Class 2 weight
-# All dirs:   0.37              21.0              3.97
-# Train:      0.37              20.5              3.89
-# Test:       0.37              14.7              4.91
-# Validation: 0.37              68.7              3.81
-
-# def loss_function(output, target):
-#     class_1_weight = 1.0
-#     class_0_weight = 1.0
-#     temp1 = torch.clamp(torch.log(  output), min=-100)
-#     temp2 = torch.clamp(torch.log(1 - output), min=-100)
-
-#     all_loss = -(class_1_weight * (target * temp1) + class_0_weight * ((1 - target) * temp2))
-#     loss = torch.mean(all_loss)
-#     return loss
+# All dirs:   0.369             5.759             8.680
+# Train:      0.369             5.762             8.695
+# Test:       0.369             5.746             8.620
+# Validation: 0.369             5.746             8.620
 
 def get_number_per_class(dir_path):
     p1_fields = np.array([[f"p1x{i}", f"p1y{i}"] for i in range(1, 18)]).flatten()
@@ -161,36 +154,21 @@ def get_number_per_class(dir_path):
 # This is the function that we will use in the pipeline to classify the poses as no tackle, low tackle or high tackle
 def tackle_classification(model, player1_distances, player2_distances, device):
     model.eval()
-    print("Player 1 distances", player1_distances)
-    print("Player 2 distances", player2_distances)
+    # Create the input tensor
     player1_distances = torch.tensor(player1_distances)
     player2_distances = torch.tensor(player2_distances)
     player1_distances = torch.flatten(player1_distances)
     player2_distances = torch.flatten(player2_distances)
-    print("Player 1 distances", player1_distances)
-    print("Player 2 distances", player2_distances)
     input_tensor = torch.cat((player1_distances, player2_distances))
-    # Create the input tensor
-    print(input_tensor.shape)
-    print("input tensor", input_tensor)
-
     # Change the shape to be 1 x 68
     input_tensor = torch.reshape(input_tensor, (1, -1))
-    print("Reshaped input tensor", input_tensor)
-    print("Input tensor shape", input_tensor.shape)
-
-    # Flatten the tensor
     input_tensor = input_tensor.to(device)
     input_tensor = input_tensor.to(dtype=torch.float32)
-    print("Input tensor", input_tensor)
     # Get the prediction
-    pred = None
     with torch.no_grad():
         pred = model(input_tensor)
-        print("Prediction", pred)
         pred = torch.argmax(pred)
-        print("Argmax", pred)
-    return pred
+        return pred
 
 
 def train(model, train_loader, loss_function, optimiser, batch_size= 4):
@@ -220,6 +198,7 @@ def validate(model, train_loader, loss_function, batch_size= 4):
     total_loss = 0
     all_preds = []
     all_labels = []
+    all_weights = []
     with torch.no_grad():
         for batch_id, (name, frame, X, y) in enumerate(train_loader):
             X, y = X.to(device), y.to(device)
@@ -229,26 +208,69 @@ def validate(model, train_loader, loss_function, batch_size= 4):
             total_loss += loss_function(pred, y).item()
             all_preds = all_preds + pred.tolist()
             all_labels = all_labels + y.tolist()
+            all_weights = all_weights + [0.34 if y == 0 else 5.759 if y == 1 else 8.580 for y in y.tolist()]
             computed_so_far += len(X)
             print(f"[{computed_so_far:>5d}/{size:>5d}]")  
     
 
     all_preds = [np.argmax(pred) for pred in all_preds]
+    correct = sum([1 if all_preds[i] == all_labels[i] else 0 for i in range(len(all_preds))])
     print(f"Validation complete")
    
-    cm = confusion_matrix(all_labels, all_preds)
+    cm = confusion_matrix(all_labels, all_preds, normalize="true")
     cm_df = pd.DataFrame(cm, 
                          index = ["No Tackle", "Low Tackle", "High Tackle"],
                          columns = ["No Tackle", "Low Tackle", "High Tackle"])
     f_1 = f1_score(all_labels, all_preds, average=None)
-    weighted_f1 = f1_score(all_labels, all_preds, average="weighted")
+    weighted_f1 = f1_score(all_labels, all_preds, average="weighted", sample_weight=all_weights)
 
     print(f"Non Tackle F1: {f_1[0]} Low Tackle F1: {f_1[1]} High Tackle F1: {f_1[2]} weighted F1: {weighted_f1}")
 
-    return (100*correct), total_loss/size,  weighted_f1, cm_df, f_1
+    return (correct / size * 100), total_loss/size,  weighted_f1, cm_df, f_1
+
+def evaluate(model, test_loader, loss_function, batch_size=4):
+    model.eval()
+    print("----------------- Starting Evaluation -----------------")
+    size = len(test_loader.dataset)
+    computed_so_far = 0
+    correct = 0
+    total_loss = 0
+    all_preds = []
+    all_labels = []
+    all_weights = []
+    with torch.no_grad():
+        for batch_id, (name, frame, X, y) in enumerate(test_loader):
+            X, y = X.to(device), y.to(device)
+            X = X.to(dtype=torch.float32)
+            X = torch.reshape(X, (X.shape[0], -1))
+            pred = model(X)    
+            total_loss += loss_function(pred, y).item()
+            all_preds = all_preds + pred.tolist()
+            all_labels = all_labels + y.tolist()
+            all_weights = all_weights + [0.34 if y == 0 else 5.759 if y == 1 else 8.580 for y in y.tolist()]
+            computed_so_far += len(X)
+            print(f"[{computed_so_far:>5d}/{size:>5d}]")  
+    
+
+    all_preds = [np.argmax(pred) for pred in all_preds]
+    correct = sum([1 if all_preds[i] == all_labels[i] else 0 for i in range(len(all_preds))])
+    print(f"Validation complete")
+   
+    cm = confusion_matrix(all_labels, all_preds, normalize="true")
+    cm_df = pd.DataFrame(cm, 
+                         index = ["No Tackle", "Low Tackle", "High Tackle"],
+                         columns = ["No Tackle", "Low Tackle", "High Tackle"])
+    f_1 = f1_score(all_labels, all_preds, average=None)
+    weighted_f1 = f1_score(all_labels, all_preds, average="weighted", sample_weight=all_weights)
+
+    print(f"Non Tackle F1: {f_1[0]} Low Tackle F1: {f_1[1]} High Tackle F1: {f_1[2]} weighted F1: {weighted_f1}")
+
+    return (correct / size * 100), total_loss/size,  weighted_f1, cm_df, f_1
 
 def save_model(model, out_path):
     torch.save(model, out_path)
+
+
 
 def split_data(data_path, train_size, validate_size, test_size):
     p1_fields = np.array([[f"p1x{i}", f"p1y{i}"] for i in range(1, 18)]).flatten()
@@ -296,7 +318,9 @@ def plot_confusion_matrix(cm, path):
     plt.xlabel('Predicted Values')
     plt.savefig(path)
 
-def main(): 
+def main(is_test=False): 
+    # split_data("/dcs/large/u2102661/CS310/datasets/pose_estimation", 0.8, 0.1, 0.1)
+    # In the order of test, train, validation
     number_no_tackles, number_low_tackles, number_high_tackles = get_number_per_class("/dcs/large/u2102661/CS310/datasets/pose_estimation")
     print("Number of no tackles", number_no_tackles)
     print("Number of low tackles", number_low_tackles)
@@ -304,19 +328,27 @@ def main():
     print("total no tackles", sum(number_no_tackles),
           "total low tackles", sum(number_low_tackles),
           "total high tackles", sum(number_high_tackles))
-    my_model = PoseClassifierModel(17).to(device)
-    optimiser = torch.optim.Adam(my_model.parameters(), lr=0.001)
-    loss_function = nn.CrossEntropyLoss(weight=torch.tensor([0.37, 20.5, 3.89]).to(device))
+    
     batch_size = 32
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     validate_loader = DataLoader(validate_dataset, batch_size=batch_size, shuffle=True)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=True)
 
+    loss_function = nn.CrossEntropyLoss(weight=torch.tensor([0.34, 5.759, 8.580]).to(device))
+    if is_test:
+        my_model = torch.load("/dcs/large/u2102661/CS310/models/pose_estimation/best.pt", map_location=device)
+        accuracy, average_loss, f_1, cm_df, f1_array = evaluate(my_model, test_loader, loss_function, batch_size)
+        print(f"Test Error: \n Accuracy: {accuracy:>0.1f}%, Average loss: {average_loss:>8f} \n")
+        plot_confusion_matrix(cm_df, "/dcs/large/u2102661/CS310/model_evaluation/pose_classification/test_confusion_matrix.png")
+        return
+
+    my_model = PoseClassifierModel(17).to(device)
+    optimiser = torch.optim.Adam(my_model.parameters(), lr=0.001, weight_decay=0.001)
     epochs = 100
     best_f1_score = 0
     best_epoch = 0
     number_since_best = 0
-    patience = 50
+    patience = 40
     for e in range(epochs):
         print(f"Epoch {e + 1}\n-------------------------------")
         train(my_model, train_loader, loss_function, optimiser, batch_size)
@@ -340,5 +372,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main(is_test=False)
+    main(is_test=True)
 

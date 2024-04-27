@@ -36,23 +36,48 @@ def split_data(dir_in, split_ratio):
     print('Data split complete')
     
 def train_model(data_path):
+    # model = ultralytics.YOLO('yolov9e.yaml').load("yolov9e.pt")
     model = ultralytics.YOLO('yolov8x.yaml').load("yolov8x.pt")
     print("Model loaded")
     model = model.to(device)
+    # ARGS = {
+    #     "degrees": 15.0, # (float) image rotation (+/- deg)
+    #     "translate": 0.1, # (float) image translation (+/- fraction)
+    #     "scale": 0.5, # (float) image scale (+/- gain)
+    #     "shear": 5.0, # (float) image shear (+/- deg)
+    #     # perspective: 0.0 # (float) image perspective (+/- fraction), range 0-0.001
+    #     "flipud": 0.0, # (float) image flip up-down (probability)
+    #     "fliplr": 0.5, # (float) image flip left-right (probability)
+    #     "mosaic": 1.0, # (float) image mosaic (probability)
+    #     "mixup": 0.3, # (float) image mixup (probability)
+    #     "copy_paste": 0.3, # (float) segment copy-paste (probability)
+    #     # auto_augment: randaugment # (str) auto augmentation policy for classification (randaugment, autoaugment, augmix)
+    #     "erasing": 0.4, # (float) probability of random erasing during classification training (0-1)
+    # }
     results = model.train(
         data=data_path,
         project="/dcs/large/u2102661/CS310/models/tackle_location",
-        epochs=400, 
-        imgsz=1280, 
+        epochs=300, 
+        imgsz=640, 
         single_cls=True, 
         pretrained=True,
-        batch=8, 
-        patience=0, 
+        batch=32, 
+        patience=50, 
         optimizer="Adam",
         close_mosaic=20, 
         lr0=0.001,
-        freeze=12,
-        dropout=0.3
+        # freeze=12,
+        dropout=0.3, 
+        # Data agumentation
+        degrees=10.0,
+        translate=0.1,
+        scale=0.5,
+        shear=2.0,
+        fliplr=0.5,
+        mosaic=1.0,
+        mixup=0.3,
+        copy_paste=0.3,
+        erasing=0.4,
     )
     return results
 
@@ -107,9 +132,9 @@ def evaluate_model(input_path, output_path, model):
 def main():
     # dir = sys.argv[1]
     # split_data(dir, (0.1, 0.1, 0.8))
-    # train_model("/dcs/large/u2102661/CS310/datasets/tackle_location/data.yaml")
-    model = ultralytics.YOLO('yolov8x.yaml').load("/dcs/large/u2102661/CS310/models/tackle_location/train/weights/best.pt")
-    evaluate_model("/dcs/large/u2102661/CS310/datasets/anomaly_detection/tackle_videos", "/dcs/large/u2102661/CS310/model_evaluation/tackle_location", model)
+    train_model("/dcs/large/u2102661/CS310/datasets/tackle_location_new/data.yaml")
+    # model = ultralytics.YOLO('yolov8x.yaml').load("/dcs/large/u2102661/CS310/models/tackle_location/train/weights/best.pt")
+    # evaluate_model("/dcs/large/u2102661/CS310/datasets/anomaly_detection/tackle_videos", "/dcs/large/u2102661/CS310/model_evaluation/tackle_location", model)
 
 
 if __name__ == '__main__':
