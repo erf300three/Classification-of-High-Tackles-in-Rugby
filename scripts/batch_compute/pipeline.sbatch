@@ -19,6 +19,22 @@ source /etc/profile.d/conda.sh
 # module load CUDA
 # module load Python/3.11.0
 
+args="--dir_path='/dcs/large/u2102661/CS310/datasets/activity_recogniser/original_clips'\
+    --output_dir='/dcs/large/u2102661/CS310/model_evaluation/pipeline_original_clips'\
+    --temporal_locator='/dcs/large/u2102661/CS310/models/activity_recogniser/r3d_18/5_frames/best.pt'\
+    --spatial_locator='/dcs/large/u2102661/CS310/models/tackle_location/train5/weights/best.pt'\
+    --pose_estimator='yolov8x-pose-p6.pt'\
+    --pose_classifier='/dcs/large/u2102661/CS310/models/pose_estimation/run_new_data_12/best.pt'\
+    --number_of_clip_frames=5\
+    --temporal_full_version=True\
+    --temporal_conf_threshold=0.5\
+    --group_size=10\
+    --group_required=15\
+    --before_buffer=10\
+    --after_buffer=10\
+    --spatial_conf_threshold=0.5\
+"
+
 ## This is specific to my environment, you will need to change this to your own ##
 source /dcs/21/u2102661/Documents/3rdYear/CS310/Classification-of-High-Tackles-in-Rugby/venv/bin/activate
-srun python3 /dcs/21/u2102661/Documents/3rdYear/CS310/Classification-of-High-Tackles-in-Rugby/scripts/python/pipeline.py
+srun python3 /dcs/21/u2102661/Documents/3rdYear/CS310/Classification-of-High-Tackles-in-Rugby/scripts/python/pipeline.py $args
