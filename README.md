@@ -5,6 +5,11 @@
 This project aims to classify the legality of a tackle based on the domestic law variation. If there is anything in the 
 code that is worth looking at it is the full pipeline results that can be found within the Model Evalation directory. 
 
+We used GitHub Copilot throughout the project to help with documentation and as a productivity tool to  reduce the amount
+of time spent writing repetitive lines of code. It was not used to write entire functions or sections of code due to the 
+known unreliability of the code that it produces. Instead, it was often use to finish single lines of code of well known
+structures such as a for loop. 
+
 ## Running the project 
 
 Unfortunately, due to none of the data could be provided with the submissions for this project. This means there is no 
