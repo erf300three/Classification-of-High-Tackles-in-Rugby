@@ -1,7 +1,7 @@
 numpy
 pandas
 opencv-python
-ffmpeg
+ffmpeg-python
 moviepy
 torch
 av

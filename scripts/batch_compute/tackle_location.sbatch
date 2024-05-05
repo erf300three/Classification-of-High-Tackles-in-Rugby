@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-#SBATCH --job-name=action_recogniser # Job name for tracking
+#SBATCH --job-name=tackle_locator # Job name for tracking
 #SBATCH --partition=gecko     # Partition you wish to use (see above for list)
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=12     # Number of CPU threads used by your job

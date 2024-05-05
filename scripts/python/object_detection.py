@@ -1,11 +1,14 @@
-from ultralytics import YOLO
-from ultralytics.solutions import heatmap
 import os
 import torch 
 import cv2
-
-from ultralytics.utils.plotting import Annotator, colors
 from collections import defaultdict
+
+from ultralytics import YOLO
+from ultralytics.solutions import heatmap
+from ultralytics.utils.plotting import Annotator, colors
+
+# A experimentation script to understand how to use Ultralytics API. None of the code in this file was used beyond
+# the first week of development. The code in this file has not been linted or refactored.
 
 def object_tracking(input_path, output_path, yolo):
     """
@@ -28,7 +31,8 @@ def object_detection_in_video(input_path, output_path, yolo):
     :return: whether the operation was successful
     """
     # Make the videos directory if it doesn't exist
-    os.makedirs(os.path.join(output_path, "videos")) if not os.path.exists(os.path.join(output_path, "videos")) else None
+    if not os.path.exists(os.path.join(output_path, "videos")):
+        os.makedirs(os.path.join(output_path, "videos"))
 
     #  Make a .txt file for an overview of the results
     with open(os.path.join(output_path, "results.txt"), "w") as f:

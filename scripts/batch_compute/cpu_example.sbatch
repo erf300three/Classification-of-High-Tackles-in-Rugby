@@ -16,4 +16,5 @@ source /etc/profile.d/conda.sh
 
 ## Execute your program(s) ##
 source /dcs/21/u2102661/Documents/3rdYear/CS310/Classification-of-High-Tackles-in-Rugby/venv/bin/activate
-srun python3 /dcs/21/u2102661/Documents/3rdYear/CS310/Classification-of-High-Tackles-in-Rugby/scripts/python/anomaly_detection.py
+srun python3 /dcs/21/u2102661/Documents/3rdYear/CS310/Classification-of-High-Tackles-in-Rugby/scripts/python/video_conversion.py --format="mov" --dir="/dcs/large/u2102661/CS310/datasets/full_length_games/temp6" --out_dir="/dcs/large/u2102661/CS310/datasets/full_length_games/temp6"
+
